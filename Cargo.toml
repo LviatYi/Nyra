@@ -1,0 +1,15 @@
+[package]
+name = "nyra"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tesseract-rs = { version = "0.1.20", features = ["build-tesseract"] }
+
+[dev-dependencies]
+image = "0.25.5"
+imageproc = "0.25.0"
+xcap = "0.9.1"
+
+[patch.crates-io]
+tesseract-rs = { path = "vendor/tesseract-rs" }
