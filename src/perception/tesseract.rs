@@ -1,12 +1,13 @@
+use crate::measure::measure;
+use crate::perception::text_perceptor::TextPerceptor;
+use image::codecs::bmp::BmpEncoder;
+use image::imageops::resize;
+use image::{ColorType, DynamicImage, ImageEncoder};
 use std::env;
 use std::error::Error;
 use std::os::raw::c_void;
 use std::path::PathBuf;
-use image::codecs::bmp::BmpEncoder;
-use image::{ColorType, ImageEncoder};
 use tesseract_rs::{TessPageSegMode, TesseractAPI};
-use crate::apperceiver::text_apperceiver::TextApperceiver;
-use crate::measure::measure;
 
 #[link(name = "leptonica")]
 unsafe extern "C" {
@@ -15,11 +16,11 @@ unsafe extern "C" {
     fn pixDestroy(pix: *mut *mut c_void);
 }
 
-pub struct TesseractApperceiver {
+pub struct TesseractPerceptor {
     api: TesseractAPI,
 }
 
-impl TesseractApperceiver {
+impl TesseractPerceptor {
     pub fn new() -> Self {
         Self {
             api: TesseractAPI::new(),
@@ -46,10 +47,18 @@ impl TesseractApperceiver {
     }
 }
 
-impl TextApperceiver for TesseractApperceiver {
-    fn recognize(&self, image: &image::GrayImage) -> Result<String, Box<dyn Error>> {
-        let bmp_bytes = measure("encode_bmp", || encode_bmp(image))?;
-        let mut pix = measure("encode_pix", || unsafe { pixReadMemBmp(bmp_bytes.as_ptr(), bmp_bytes.len()) });
+impl TextPerceptor for TesseractPerceptor {
+    fn recognize(&self, image: &image::DynamicImage) -> Result<String, Box<dyn Error>> {
+        let image = DynamicImage::ImageRgba8(resize(
+            image,
+            image.width().saturating_mul(2),
+            image.height().saturating_mul(2),
+            image::imageops::FilterType::Lanczos3,
+        ));
+        let bmp_bytes = measure("encode_bmp", || encode_bmp(&image))?;
+        let mut pix = measure("encode_pix", || unsafe {
+            pixReadMemBmp(bmp_bytes.as_ptr(), bmp_bytes.len())
+        });
 
         if pix.is_null() {
             return Err("Leptonica pixReadMemBmp failed to load the in-memory BMP image.".into());
@@ -60,9 +69,9 @@ impl TextApperceiver for TesseractApperceiver {
             self.api.set_source_resolution(144)
         })?;
 
-        let text = measure(
-            "tesseract_api_get_text",
-            || self.api.get_utf8_text().map(|r| { r.trim().to_string() }))?;
+        let text = measure("tesseract_api_get_text", || {
+            self.api.get_utf8_text().map(|r| r.trim().to_string())
+        })?;
         unsafe { pixDestroy(&mut pix) };
         Ok(text)
     }
@@ -78,11 +87,11 @@ fn tessdata_dir() -> Result<PathBuf, Box<dyn Error>> {
     Ok(PathBuf::from(appdata).join("tesseract-rs").join("tessdata"))
 }
 
-fn encode_bmp(image: &image::GrayImage) -> Result<Vec<u8>, Box<dyn Error>> {
+fn encode_bmp(image: &image::DynamicImage) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut bytes = Vec::new();
     let encoder = BmpEncoder::new(&mut bytes);
     encoder.write_image(
-        image.as_raw(),
+        image.to_luma8().as_raw(),
         image.width(),
         image.height(),
         ColorType::L8.into(),

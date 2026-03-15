@@ -1,6 +1,6 @@
-pub mod apperceiver;
+pub mod perception;
 pub mod measure;
-mod selector;
+mod capture;
 
 #[cfg(not(target_os = "windows"))]
 fn main() {
@@ -10,14 +10,13 @@ fn main() {
 
 #[cfg(target_os = "windows")]
 mod app {
-    use crate::apperceiver::tesseract::TesseractApperceiver;
-    use crate::apperceiver::text_apperceiver::TextApperceiver;
+    use crate::perception::tesseract::TesseractPerceptor;
+    use crate::perception::text_perceptor::TextPerceptor;
     use crate::measure::measure;
-    use image::imageops::FilterType;
     use std::env;
     use std::error::Error;
     use tracing::level_filters::LevelFilter;
-    use xcap::Monitor;
+    use crate::capture::selector::{AreaSelector, ImageCapture};
 
     pub fn bootstrap() -> Result<(), Box<dyn Error>> {
         tracing_subscriber::fmt()
@@ -31,12 +30,12 @@ mod app {
 
     pub fn run() -> Result<i32, Box<dyn Error>> {
         let args = CliArgs::parse(env::args().skip(1))?;
-        let image = capture_region(args.x1, args.y1, args.x2, args.y2)?;
+        let image = AreaSelector::from_rect(args.x1, args.y1, args.x2, args.y2).capture()?;
         save_debug_image(&image)?;
 
-        let text_apperceiver = measure("init_tesseract_apperceiver", || TesseractApperceiver::new_with_init());
+        let text_perceptor = measure("init_tesseract_perceptor", || TesseractPerceptor::new_with_init());
 
-        let recognized = measure("text_recognize", || text_apperceiver.recognize(&image))?;
+        let recognized = measure("text_recognize", || text_perceptor.recognize(&image))?;
 
         let matched = recognized.contains(&args.text);
 
@@ -44,7 +43,7 @@ mod app {
             println!("success");
             Ok(0)
         } else {
-            println!("failed");
+            println!("failed. original text: {}", recognized);
             Ok(1)
         }
     }
@@ -93,62 +92,11 @@ mod app {
             .map_err(|_| format!("Invalid integer for `{name}`: {value}\n{usage}").into())
     }
 
-    fn capture_region(
-        x1: i32,
-        y1: i32,
-        x2: i32,
-        y2: i32,
-    ) -> Result<image::GrayImage, Box<dyn Error>> {
-        let left = x1.min(x2);
-        let top = y1.min(y2);
-        let right = x1.max(x2);
-        let bottom = y1.max(y2);
-        let width = u32::try_from(right - left)
-            .map_err(|_| "Region width must be positive.")?
-            .max(1);
-        let height = u32::try_from(bottom - top)
-            .map_err(|_| "Region height must be positive.")?
-            .max(1);
-
-        let top_left_monitor = Monitor::from_point(left, top)?;
-        let bottom_right_monitor = Monitor::from_point(right - 1, bottom - 1)?;
-
-        if !same_monitor(&top_left_monitor, &bottom_right_monitor)? {
-            return Err("The selected region crosses multiple monitors, which is not supported.".into());
-        }
-
-        let relative_x = u32::try_from(left - top_left_monitor.x()?)?;
-        let relative_y = u32::try_from(top - top_left_monitor.y()?)?;
-
-        let max_width = top_left_monitor.width()?.saturating_sub(relative_x);
-        let max_height = top_left_monitor.height()?.saturating_sub(relative_y);
-        if width > max_width || height > max_height {
-            return Err("The selected region exceeds the monitor bounds.".into());
-        }
-
-        let capture = top_left_monitor.capture_region(relative_x, relative_y, width, height)?;
-        let grayscale = image::DynamicImage::ImageRgba8(capture).to_luma8();
-
-        Ok(image::imageops::resize(
-            &grayscale,
-            grayscale.width().saturating_mul(2),
-            grayscale.height().saturating_mul(2),
-            FilterType::CatmullRom,
-        ))
-    }
-
-    fn save_debug_image(image: &image::GrayImage) -> Result<(), Box<dyn Error>> {
+    fn save_debug_image(image: &image::DynamicImage) -> Result<(), Box<dyn Error>> {
         let path = env::temp_dir().join("nyra-captured-region.png");
         image.save(&path)?;
         tracing::info!(target = "capture_debug_image", path = %path.display(), "saved captured region");
         Ok(())
-    }
-
-    fn same_monitor(left: &Monitor, right: &Monitor) -> Result<bool, Box<dyn Error>> {
-        Ok(left.x()? == right.x()?
-            && left.y()? == right.y()?
-            && left.width()? == right.width()?
-            && left.height()? == right.height()?)
     }
 
     #[cfg(test)]
