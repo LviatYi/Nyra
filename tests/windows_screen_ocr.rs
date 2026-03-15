@@ -84,7 +84,10 @@ fn threshold_image(image: &GrayImage, threshold: u8) -> GrayImage {
     out
 }
 
-fn save_preprocessed_title_region(image_path: &Path, output_path: &Path) -> Result<(), Box<dyn Error>> {
+fn save_preprocessed_title_region(
+    image_path: &Path,
+    output_path: &Path,
+) -> Result<(), Box<dyn Error>> {
     let image = image::open(image_path)?;
     let title_region = crop_title_region(&image);
     let grayscale = title_region.to_luma8();
@@ -102,7 +105,10 @@ fn save_preprocessed_title_region(image_path: &Path, output_path: &Path) -> Resu
 fn recognize_text(image_path: &Path) -> Result<String, Box<dyn Error>> {
     let tessdata_dir = get_tessdata_dir();
     let tesseract = get_tesseract_executable();
-    let output = Command::new(tesseract)
+    println!("Tesseract: {}", tesseract.display());
+    println!("Tesseract data {}", tessdata_dir.display());
+    let mut output = Command::new(tesseract);
+    output
         .arg(image_path)
         .arg("stdout")
         .arg("--tessdata-dir")
@@ -112,8 +118,11 @@ fn recognize_text(image_path: &Path) -> Result<String, Box<dyn Error>> {
         .args([
             "-c",
             "tessedit_char_whitelist=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ .",
-        ])
-        .output()?;
+        ]);
+
+    println!("Commandline {:?}", output);
+
+    let output = output.output()?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -124,7 +133,7 @@ fn recognize_text(image_path: &Path) -> Result<String, Box<dyn Error>> {
 }
 
 #[test]
-#[ignore = "Requires a visible RustRover window whose title contains 'nyra'"]
+// #[ignore = "Requires a visible RustRover window whose title contains 'nyra'"]
 fn ocr_detects_nyra_in_rustrover_titlebar() -> Result<(), Box<dyn Error>> {
     let output_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("target")
