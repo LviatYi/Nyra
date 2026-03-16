@@ -11,13 +11,13 @@ fn main() {
 
 #[cfg(target_os = "windows")]
 mod app {
-    use crate::capture::selector::ImageCapture;
     use crate::measure::measure;
     use crate::perception::tesseract::TesseractPerceptor;
-    use crate::perception::text_perceptor::TextPerceptor;
-    use crate::sentry::sentry::{AlarmMode, FocusPoint, SentryTask};
+    use crate::sentry::sentry::SentryTask;
     use std::env;
     use std::error::Error;
+    use std::fs;
+    use std::path::Path;
     use tracing::level_filters::LevelFilter;
 
     pub fn bootstrap() -> Result<(), Box<dyn Error>> {
@@ -32,22 +32,16 @@ mod app {
 
     pub fn run() -> Result<i32, Box<dyn Error>> {
         let task = parse_task(env::args().skip(1))?;
-        let image = task.patrol.capture()?;
-        save_debug_image(&image)?;
-
         let text_perceptor = measure("init_tesseract_perceptor", || {
             TesseractPerceptor::new_with_init()
         });
+        let outcome = measure("sentry_run", || task.evaluate(&text_perceptor))?;
 
-        let recognized = measure("text_recognize", || text_perceptor.recognize(&image))?;
-        let matched = matches_focus(&recognized, &task.focus_on);
-
-        if matched {
-            emit_alarm(&task.alarm_mode, &recognized);
+        if outcome.matched {
             println!("success");
             Ok(0)
         } else {
-            println!("failed. original text: {}", recognized);
+            println!("failed. original text: {}", outcome.recognized_text);
             Ok(1)
         }
     }
@@ -57,7 +51,7 @@ mod app {
         I: Iterator<Item = String>,
     {
         let usage = concat!(
-            "Usage: nyra '<SentryTask JSON>'\n",
+            "Usage: nyra '<SentryTask JSON>' | nyra <path-to-task.json>\n",
             "Example: nyra ",
             r#""{"patrol":{"Rect":{"x1":100,"y1":200,"x2":600,"y2":300}},"frequency_ms":500,"focus_on":{"ContainsText":"Hello"},"alarm_mode":"PrintLog"}""#,
         );
@@ -67,34 +61,39 @@ mod app {
             return Err(usage.into());
         }
 
-        serde_json::from_str::<SentryTask>(&input)
+        let task_json = load_task_input(&input)?;
+
+        serde_json::from_str::<SentryTask>(&task_json)
             .map_err(|error| format!("Invalid SentryTask JSON: {error}\n{usage}").into())
     }
 
-    fn matches_focus(recognized: &str, focus_on: &FocusPoint) -> bool {
-        match focus_on {
-            FocusPoint::ContainsText(expected) => recognized.contains(expected),
+    fn load_task_input(input: &str) -> Result<String, Box<dyn Error>> {
+        let trimmed = input.trim();
+
+        if looks_like_json(trimmed) {
+            return Ok(trimmed.to_string());
         }
+
+        let path = Path::new(trimmed);
+        if path.is_file() {
+            return fs::read_to_string(path)
+                .map_err(|error| format!("Failed to read task file `{trimmed}`: {error}").into());
+        }
+
+        Ok(trimmed.to_string())
     }
 
-    fn emit_alarm(alarm_mode: &AlarmMode, recognized: &str) {
-        match alarm_mode {
-            AlarmMode::PrintLog => println!("matched text: {}", recognized),
-        }
-    }
-
-    fn save_debug_image(image: &image::DynamicImage) -> Result<(), Box<dyn Error>> {
-        let path = env::temp_dir().join("nyra-captured-region.png");
-        image.save(&path)?;
-        tracing::info!(target = "capture_debug_image", path = %path.display(), "saved captured region");
-        Ok(())
+    fn looks_like_json(input: &str) -> bool {
+        matches!(input.chars().next(), Some('{') | Some('[') | Some('"'))
     }
 
     #[cfg(test)]
     mod tests {
-        use super::{matches_focus, parse_task};
+        use super::parse_task;
         use crate::capture::selector::CaptureSelector;
         use crate::sentry::sentry::{AlarmMode, FocusPoint, SentryTask};
+        use std::env;
+        use std::fs;
 
         #[test]
         fn parses_sentry_task_from_json_input() {
@@ -128,20 +127,37 @@ mod app {
             assert!(
                 error
                     .to_string()
-                    .contains("Usage: nyra '<SentryTask JSON>'")
+                    .contains("Usage: nyra '<SentryTask JSON>' | nyra <path-to-task.json>")
             );
         }
 
         #[test]
-        fn matches_contains_text_focus() {
-            assert!(matches_focus(
-                "system alert triggered",
-                &FocusPoint::ContainsText("alert".to_string()),
-            ));
-            assert!(!matches_focus(
-                "system healthy",
-                &FocusPoint::ContainsText("alert".to_string()),
-            ));
+        fn parses_sentry_task_from_json_file() {
+            let path = env::temp_dir().join("nyra-parse-task-test.json");
+            fs::write(
+                &path,
+                r#"{"patrol":{"Rect":{"x1":250,"y1":0,"x2":350,"y2":50}},"frequency_ms":500,"focus_on":{"ContainsText":"nyra"},"alarm_mode":"PrintLog"}"#,
+            )
+            .unwrap();
+
+            let task = parse_task([path.display().to_string()].into_iter()).unwrap();
+
+            assert_eq!(
+                task,
+                SentryTask::new(
+                    CaptureSelector::Rect {
+                        x1: 250,
+                        y1: 0,
+                        x2: 350,
+                        y2: 50,
+                    },
+                    500,
+                    FocusPoint::ContainsText("nyra".to_string()),
+                    AlarmMode::PrintLog,
+                ),
+            );
+
+            fs::remove_file(path).unwrap();
         }
     }
 }
