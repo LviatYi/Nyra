@@ -7,26 +7,25 @@ pub trait ImageCapture {
     fn capture(&self) -> Result<image::DynamicImage, Box<dyn Error>>;
 }
 
-pub struct RegionSelector {
-    st: SelectorType,
+pub enum CaptureSelector {
+    FullScreen,
+    Rect { x1: i32, y1: i32, x2: i32, y2: i32 },
 }
 
-impl RegionSelector {
+impl CaptureSelector {
     pub fn from_rect(x1: i32, y1: i32, x2: i32, y2: i32) -> Self {
-        RegionSelector {
-            st: SelectorType::Rect { x1, y1, x2, y2 },
-        }
+        CaptureSelector::Rect { x1, y1, x2, y2 }
     }
 }
 
-impl ImageCapture for RegionSelector {
+impl ImageCapture for CaptureSelector {
     fn capture(&self) -> Result<image::DynamicImage, Box<dyn Error>> {
-        match self.st {
-            SelectorType::Rect { x1, y1, x2, y2 } => {
-                let left = x1.min(x2);
-                let top = y1.min(y2);
-                let right = x1.max(x2);
-                let bottom = y1.max(y2);
+        match self {
+            CaptureSelector::Rect { x1, y1, x2, y2 } => {
+                let left = *x1.min(x2);
+                let top = *y1.min(y2);
+                let right = *x1.max(x2);
+                let bottom = *y1.max(y2);
 
                 let width = u32::try_from(right - left)
                     .map_err(|_| "Region width must be positive.")?
@@ -60,7 +59,7 @@ impl ImageCapture for RegionSelector {
 
                 Ok(result)
             }
-            SelectorType::FullScreen => Monitor::all()?
+            CaptureSelector::FullScreen => Monitor::all()?
                 .into_iter()
                 .map(|monitor| monitor.capture_image())
                 .try_fold(None, |acc: Option<image::DynamicImage>, capture_result| {
@@ -86,9 +85,4 @@ impl ImageCapture for RegionSelector {
                 .ok_or("No monitors found to capture.".into()),
         }
     }
-}
-
-pub enum SelectorType {
-    FullScreen,
-    Rect { x1: i32, y1: i32, x2: i32, y2: i32 },
 }
