@@ -1,31 +1,27 @@
+use crate::capture::tools::same_monitor;
+use image::GenericImage;
 use std::error::Error;
 use xcap::Monitor;
-use crate::capture::tools::same_monitor;
 
 pub trait ImageCapture {
     fn capture(&self) -> Result<image::DynamicImage, Box<dyn Error>>;
 }
 
-pub struct AreaSelector {
-    r#type: SelectorType,
+pub struct RegionSelector {
+    st: SelectorType,
 }
 
-impl AreaSelector {
+impl RegionSelector {
     pub fn from_rect(x1: i32, y1: i32, x2: i32, y2: i32) -> Self {
-        AreaSelector {
-            r#type: SelectorType::Rect {
-                x1,
-                y1,
-                x2,
-                y2,
-            }
+        RegionSelector {
+            st: SelectorType::Rect { x1, y1, x2, y2 },
         }
     }
 }
 
-impl ImageCapture for AreaSelector {
+impl ImageCapture for RegionSelector {
     fn capture(&self) -> Result<image::DynamicImage, Box<dyn Error>> {
-        match self.r#type {
+        match self.st {
             SelectorType::Rect { x1, y1, x2, y2 } => {
                 let left = x1.min(x2);
                 let top = y1.min(y2);
@@ -43,7 +39,10 @@ impl ImageCapture for AreaSelector {
                 let bottom_right_monitor = Monitor::from_point(right - 1, bottom - 1)?;
 
                 if !same_monitor(&top_left_monitor, &bottom_right_monitor)? {
-                    return Err("The selected region crosses multiple monitors, which is not supported.".into());
+                    return Err(
+                        "The selected region crosses multiple monitors, which is not supported."
+                            .into(),
+                    );
                 }
 
                 let relative_x = u32::try_from(left - top_left_monitor.x()?)?;
@@ -55,20 +54,41 @@ impl ImageCapture for AreaSelector {
                     return Err("The selected region exceeds the monitor bounds.".into());
                 }
 
-                let capture = top_left_monitor.capture_region(relative_x, relative_y, width, height)?;
+                let capture =
+                    top_left_monitor.capture_region(relative_x, relative_y, width, height)?;
                 let result = image::DynamicImage::ImageRgba8(capture);
 
                 Ok(result)
             }
+            SelectorType::FullScreen => Monitor::all()?
+                .into_iter()
+                .map(|monitor| monitor.capture_image())
+                .try_fold(None, |acc: Option<image::DynamicImage>, capture_result| {
+                    let capture = capture_result?;
+                    let image = image::DynamicImage::ImageRgba8(capture);
+                    Ok::<Option<image::DynamicImage>, Box<dyn Error>>(Some(match acc {
+                        Some(prev_image) => {
+                            let prev_width = prev_image.width();
+                            let prev_height = prev_image.height();
+                            let new_width = image.width();
+                            let new_height = image.height();
+                            let mut combined_image = image::DynamicImage::new_rgba8(
+                                prev_width + new_width,
+                                prev_height.max(new_height),
+                            );
+                            combined_image.copy_from(&prev_image, 0, 0)?;
+                            combined_image.copy_from(&image, prev_width, 0)?;
+                            combined_image
+                        }
+                        None => image,
+                    }))
+                })?
+                .ok_or("No monitors found to capture.".into()),
         }
     }
 }
 
 pub enum SelectorType {
-    Rect {
-        x1: i32,
-        y1: i32,
-        x2: i32,
-        y2: i32,
-    }
+    FullScreen,
+    Rect { x1: i32, y1: i32, x2: i32, y2: i32 },
 }

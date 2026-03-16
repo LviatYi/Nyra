@@ -1,6 +1,7 @@
 pub mod perception;
 pub mod measure;
 mod capture;
+pub mod sentry;
 
 #[cfg(not(target_os = "windows"))]
 fn main() {
@@ -16,7 +17,7 @@ mod app {
     use std::env;
     use std::error::Error;
     use tracing::level_filters::LevelFilter;
-    use crate::capture::selector::{AreaSelector, ImageCapture};
+    use crate::capture::selector::{RegionSelector, ImageCapture};
 
     pub fn bootstrap() -> Result<(), Box<dyn Error>> {
         tracing_subscriber::fmt()
@@ -30,7 +31,7 @@ mod app {
 
     pub fn run() -> Result<i32, Box<dyn Error>> {
         let args = CliArgs::parse(env::args().skip(1))?;
-        let image = AreaSelector::from_rect(args.x1, args.y1, args.x2, args.y2).capture()?;
+        let image = RegionSelector::from_rect(args.x1, args.y1, args.x2, args.y2).capture()?;
         save_debug_image(&image)?;
 
         let text_perceptor = measure("init_tesseract_perceptor", || TesseractPerceptor::new_with_init());
