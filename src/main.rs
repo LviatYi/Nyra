@@ -1,6 +1,6 @@
-pub mod perception;
-pub mod measure;
 mod capture;
+pub mod measure;
+pub mod perception;
 pub mod sentry;
 
 #[cfg(not(target_os = "windows"))]
@@ -11,13 +11,13 @@ fn main() {
 
 #[cfg(target_os = "windows")]
 mod app {
+    use crate::capture::selector::{CaptureSelector, ImageCapture};
+    use crate::measure::measure;
     use crate::perception::tesseract::TesseractPerceptor;
     use crate::perception::text_perceptor::TextPerceptor;
-    use crate::measure::measure;
     use std::env;
     use std::error::Error;
     use tracing::level_filters::LevelFilter;
-    use crate::capture::selector::{CaptureSelector, ImageCapture};
 
     pub fn bootstrap() -> Result<(), Box<dyn Error>> {
         tracing_subscriber::fmt()
@@ -34,7 +34,9 @@ mod app {
         let image = CaptureSelector::from_rect(args.x1, args.y1, args.x2, args.y2).capture()?;
         save_debug_image(&image)?;
 
-        let text_perceptor = measure("init_tesseract_perceptor", || TesseractPerceptor::new_with_init());
+        let text_perceptor = measure("init_tesseract_perceptor", || {
+            TesseractPerceptor::new_with_init()
+        });
 
         let recognized = measure("text_recognize", || text_perceptor.recognize(&image))?;
 
@@ -61,7 +63,7 @@ mod app {
     impl CliArgs {
         fn parse<I>(mut args: I) -> Result<Self, Box<dyn Error>>
         where
-            I: Iterator<Item=String>,
+            I: Iterator<Item = String>,
         {
             let usage =
                 "Usage: nyra <x1> <y1> <x2> <y2> <text>\nExample: nyra 100 200 600 300 Hello";
@@ -111,7 +113,7 @@ mod app {
                     .into_iter()
                     .map(str::to_string),
             )
-                .unwrap();
+            .unwrap();
 
             assert_eq!(
                 args,

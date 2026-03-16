@@ -1,5 +1,6 @@
 use crate::capture::tools::same_monitor;
 use image::GenericImage;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use xcap::Monitor;
 
@@ -7,6 +8,7 @@ pub trait ImageCapture {
     fn capture(&self) -> Result<image::DynamicImage, Box<dyn Error>>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CaptureSelector {
     FullScreen,
     Rect { x1: i32, y1: i32, x2: i32, y2: i32 },
