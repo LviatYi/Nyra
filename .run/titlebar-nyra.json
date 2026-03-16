@@ -7,7 +7,6 @@
       "y2": 50
     }
   },
-  "frequency_ms": 500,
   "focus_on": {
     "ContainsText": "nyra"
   },

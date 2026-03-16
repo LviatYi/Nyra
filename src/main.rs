@@ -22,28 +22,21 @@ mod app {
 
     pub fn bootstrap() -> Result<(), Box<dyn Error>> {
         tracing_subscriber::fmt()
+            .with_ansi(true)
             .with_max_level(LevelFilter::INFO)
-            .with_target(false)
+            .with_target(true)
             .try_init()
             .map_err(|error| format!("failed to initialize tracing: {error}"))?;
 
         Ok(())
     }
 
-    pub fn run() -> Result<i32, Box<dyn Error>> {
+    pub async fn run() -> Result<(), Box<dyn Error>> {
         let task = parse_task(env::args().skip(1))?;
         let text_perceptor = measure("init_tesseract_perceptor", || {
             TesseractPerceptor::new_with_init()
         });
-        let outcome = measure("sentry_run", || task.evaluate(&text_perceptor))?;
-
-        if outcome.matched {
-            println!("success");
-            Ok(0)
-        } else {
-            println!("failed. original text: {}", outcome.recognized_text);
-            Ok(1)
-        }
+        task.run(&text_perceptor).await
     }
 
     fn parse_task<I>(args: I) -> Result<SentryTask, Box<dyn Error>>
@@ -113,7 +106,7 @@ mod app {
                         x2: 30,
                         y2: 40,
                     },
-                    500,
+                    Some(500),
                     FocusPoint::ContainsText("hello world".to_string()),
                     AlarmMode::PrintLog,
                 ),
@@ -151,7 +144,7 @@ mod app {
                         x2: 350,
                         y2: 50,
                     },
-                    500,
+                    Some(500),
                     FocusPoint::ContainsText("nyra".to_string()),
                     AlarmMode::PrintLog,
                 ),
@@ -159,16 +152,44 @@ mod app {
 
             fs::remove_file(path).unwrap();
         }
+
+        #[test]
+        fn defaults_missing_frequency_in_json_input() {
+            let task = parse_task(
+                [r#"{"patrol":{"Rect":{"x1":250,"y1":0,"x2":350,"y2":50}},"focus_on":{"ContainsText":"nyra"},"alarm_mode":"PrintLog"}"#]
+                    .into_iter()
+                    .map(str::to_string),
+            )
+            .unwrap();
+
+            assert_eq!(
+                task,
+                SentryTask::new(
+                    CaptureSelector::Rect {
+                        x1: 250,
+                        y1: 0,
+                        x2: 350,
+                        y2: 50,
+                    },
+                    Some(1000),
+                    FocusPoint::ContainsText("nyra".to_string()),
+                    AlarmMode::PrintLog,
+                ),
+            );
+        }
     }
 }
 
 #[cfg(target_os = "windows")]
-fn main() {
-    match app::bootstrap().and_then(|_| app::run()) {
-        Ok(code) => std::process::exit(code),
-        Err(error) => {
-            eprintln!("{error}");
-            std::process::exit(2);
-        }
+#[tokio::main(flavor = "multi_thread")]
+async fn main() {
+    if let Err(error) = app::bootstrap() {
+        eprintln!("{error}");
+        std::process::exit(2);
+    }
+
+    if let Err(error) = app::run().await {
+        eprintln!("{error}");
+        std::process::exit(2);
     }
 }
