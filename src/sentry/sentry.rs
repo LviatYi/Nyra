@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SentryTask {
-    patrol: CaptureSelector,
-    frequency_ms: u32,
-    focus_on: FocusPoint,
-    alarm_mode: AlarmMode,
+    pub patrol: CaptureSelector,
+    pub frequency_ms: u32,
+    pub focus_on: FocusPoint,
+    pub alarm_mode: AlarmMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -17,6 +17,22 @@ pub enum FocusPoint {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AlarmMode {
     PrintLog,
+}
+
+impl SentryTask {
+    pub fn new(
+        patrol: CaptureSelector,
+        frequency_ms: u32,
+        focus_on: FocusPoint,
+        alarm_mode: AlarmMode,
+    ) -> Self {
+        Self {
+            patrol,
+            frequency_ms,
+            focus_on,
+            alarm_mode,
+        }
+    }
 }
 
 #[cfg(test)]
