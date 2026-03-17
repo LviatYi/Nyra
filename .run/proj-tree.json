@@ -1,0 +1,14 @@
+{
+  "patrol": {
+    "Rect": {
+      "x1": 60,
+      "y1": 90,
+      "x2": 500,
+      "y2": 800
+    }
+  },
+  "focus_on": {
+    "ContainsText": "nyra"
+  },
+  "alarm_mode": "PrintLog"
+}
