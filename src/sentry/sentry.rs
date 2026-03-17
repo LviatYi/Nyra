@@ -89,7 +89,9 @@ impl SentryTask {
     where
         P: TextPerceptor,
     {
-        if let Some(duration) = self.interval_duration()? {
+        let interval_duration = self.interval_duration()?;
+
+        if let Some(duration) = interval_duration {
             let mut interval = time::interval(duration);
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
