@@ -2,15 +2,16 @@ use crate::capture::selector::{CaptureSelector, ImageCapture};
 use crate::perception::text_perceptor::TextPerceptor;
 use image::DynamicImage;
 use serde::{Deserialize, Serialize};
-use std::env;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::{self, MissedTickBehavior};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SentryTask {
+    #[serde(default = "new_task_id")]
+    pub id: String,
     pub patrol: CaptureSelector,
     #[serde(
         default = "default_frequency_ms",
@@ -65,7 +66,18 @@ impl SentryTask {
         focus_on: FocusPoint,
         alarm_mode: AlarmMode,
     ) -> Self {
+        Self::new_with_custom_id(new_task_id(), patrol, frequency_ms, focus_on, alarm_mode)
+    }
+
+    pub fn new_with_custom_id(
+        id: impl AsRef<str>,
+        patrol: CaptureSelector,
+        frequency_ms: Option<i64>,
+        focus_on: FocusPoint,
+        alarm_mode: AlarmMode,
+    ) -> Self {
         Self {
+            id: id.as_ref().to_string(),
             patrol,
             frequency_ms: frequency_ms.or_else(default_frequency_ms),
             focus_on,
@@ -99,7 +111,7 @@ impl SentryTask {
     {
         let image = self.patrol.capture()?;
 
-        save_debug_image(&image)?;
+        crate::probe::save_debug_image(&image, &self.id)?;
 
         self.evaluate_by_image(text_perceptor, &image)
     }
@@ -144,6 +156,10 @@ fn default_frequency_ms() -> Option<i64> {
     Some(1000)
 }
 
+fn new_task_id() -> String {
+    Uuid::new_v4().to_string()
+}
+
 fn is_default_frequency_ms(value: &Option<i64>) -> bool {
     *value == default_frequency_ms()
 }
@@ -152,21 +168,6 @@ fn matches_focus(recognized: &str, focus_on: &FocusPoint) -> bool {
     match focus_on {
         FocusPoint::ContainsText(expected) => recognized.contains(expected),
     }
-}
-
-fn save_debug_image(image: &DynamicImage) -> Result<(), Box<dyn Error>> {
-    #[cfg(debug_assertions)]
-    {
-        let path = debug_image_path();
-        image.save(&path)?;
-        tracing::info!(target = "capture_debug_image", path = %path.display(), "saved captured region");
-    }
-
-    Ok(())
-}
-
-fn debug_image_path() -> PathBuf {
-    env::temp_dir().join("nyra-captured-region.png")
 }
 
 #[cfg(test)]
@@ -178,8 +179,11 @@ mod tests {
     use std::error::Error;
     use std::time::Duration;
 
+    const TEST_SENTRY_ID: &str = "123e4567-e89b-12d3-a456-426614174000";
+
     fn create_test_sentry() -> SentryTask {
         SentryTask {
+            id: TEST_SENTRY_ID.to_string(),
             patrol: CaptureSelector::Rect {
                 x1: 10,
                 y1: 20,
@@ -197,26 +201,30 @@ mod tests {
         let task = create_test_sentry();
 
         let actual = serde_json::to_string(&task).unwrap();
-        let expected = r#"{"patrol":{"Rect":{"x1":10,"y1":20,"x2":30,"y2":40}},"frequency_ms":500,"focus_on":{"ContainsText":"alert"},"alarm_mode":"PrintLog"}"#;
+        let expected = format!(
+            r#"{{"id":"{TEST_SENTRY_ID}","patrol":{{"Rect":{{"x1":10,"y1":20,"x2":30,"y2":40}}}},"frequency_ms":500,"focus_on":{{"ContainsText":"alert"}},"alarm_mode":"PrintLog"}}"#
+        );
 
         assert_eq!(actual, expected);
     }
 
     #[test]
     fn deserializes_sentry_task_from_json() {
-        let json = r#"{"patrol":{"Rect":{"x1":10,"y1":20,"x2":30,"y2":40}},"frequency_ms":500,"focus_on":{"ContainsText":"alert"},"alarm_mode":"PrintLog"}"#;
+        let json = format!(
+            r#"{{"id":"{TEST_SENTRY_ID}","patrol":{{"Rect":{{"x1":10,"y1":20,"x2":30,"y2":40}}}},"frequency_ms":500,"focus_on":{{"ContainsText":"alert"}},"alarm_mode":"PrintLog"}}"#
+        );
 
-        let actual: SentryTask = serde_json::from_str(json).unwrap();
+        let actual: SentryTask = serde_json::from_str(&json).unwrap();
         let expected = create_test_sentry();
 
         assert_eq!(actual, expected);
     }
 
-    struct FakeTextPerceptor {
+    struct FakeTextPerceptorForTest {
         recognized_text: String,
     }
 
-    impl TextPerceptor for FakeTextPerceptor {
+    impl TextPerceptor for FakeTextPerceptorForTest {
         fn recognize(&self, _grey_image: &DynamicImage) -> Result<String, Box<dyn Error>> {
             Ok(self.recognized_text.clone())
         }
@@ -225,7 +233,7 @@ mod tests {
     #[test]
     fn run_matches_focus_text() {
         let task = create_test_sentry();
-        let perceptor = FakeTextPerceptor {
+        let perceptor = FakeTextPerceptorForTest {
             recognized_text: "system alert triggered".to_string(),
         };
         let image = DynamicImage::new_luma8(1, 1);
@@ -244,7 +252,7 @@ mod tests {
     #[test]
     fn run_reports_unmatched_text() {
         let task = create_test_sentry();
-        let perceptor = FakeTextPerceptor {
+        let perceptor = FakeTextPerceptorForTest {
             recognized_text: "system healthy".to_string(),
         };
         let image = DynamicImage::new_luma8(1, 1);
@@ -344,7 +352,26 @@ mod tests {
 
         assert_eq!(
             actual,
-            r#"{"patrol":{"Rect":{"x1":10,"y1":20,"x2":30,"y2":40}},"focus_on":{"ContainsText":"alert"},"alarm_mode":"PrintLog"}"#
+            format!(
+                r#"{{"id":"{}","patrol":{{"Rect":{{"x1":10,"y1":20,"x2":30,"y2":40}}}},"focus_on":{{"ContainsText":"alert"}},"alarm_mode":"PrintLog"}}"#,
+                task.id
+            )
+        );
+    }
+
+    #[test]
+    fn deserializes_missing_id_by_generating_uuid() {
+        let json = r#"{"patrol":{"Rect":{"x1":10,"y1":20,"x2":30,"y2":40}},"frequency_ms":500,"focus_on":{"ContainsText":"alert"},"alarm_mode":"PrintLog"}"#;
+
+        let actual: SentryTask = serde_json::from_str(json).unwrap();
+
+        assert!(!actual.id.is_empty());
+        assert_eq!(
+            actual,
+            SentryTask {
+                id: actual.id.clone(),
+                ..create_test_sentry()
+            }
         );
     }
 }

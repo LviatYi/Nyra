@@ -28,6 +28,8 @@ mod app {
             .try_init()
             .map_err(|error| format!("failed to initialize tracing: {error}"))?;
 
+        crate::probe::clean_debug_image()?;
+
         Ok(())
     }
 
@@ -95,7 +97,7 @@ mod app {
                     .into_iter()
                     .map(str::to_string),
             )
-            .unwrap();
+                .unwrap();
 
             assert_eq!(
                 task,
@@ -131,7 +133,7 @@ mod app {
                 &path,
                 r#"{"patrol":{"Rect":{"x1":250,"y1":0,"x2":350,"y2":50}},"frequency_ms":500,"focus_on":{"ContainsText":"nyra"},"alarm_mode":"PrintLog"}"#,
             )
-            .unwrap();
+                .unwrap();
 
             let task = parse_task([path.display().to_string()].into_iter()).unwrap();
 
@@ -160,7 +162,7 @@ mod app {
                     .into_iter()
                     .map(str::to_string),
             )
-            .unwrap();
+                .unwrap();
 
             assert_eq!(
                 task,
@@ -177,6 +179,50 @@ mod app {
                 ),
             );
         }
+    }
+}
+
+pub(crate) mod probe {
+    use image::DynamicImage;
+    use std::env;
+    use std::error::Error;
+    use std::path::PathBuf;
+
+    fn debug_image_trace_path() -> PathBuf {
+        env::temp_dir().join("nyra")
+    }
+
+    pub(super) fn save_debug_image(
+        image: &DynamicImage,
+        id: impl AsRef<str>,
+    ) -> Result<(), Box<dyn Error>> {
+        #[cfg(debug_assertions)]
+        {
+            let temp_dir = debug_image_trace_path();
+            if !std::fs::exists(temp_dir.as_path())? {
+                std::fs::create_dir(temp_dir.as_path())?;
+            }
+
+            let path = debug_image_trace_path().join(format!("nyra_debug_{}.png", id.as_ref()));
+            image.save(&path)?;
+            tracing::info!(target = "probe", path = %path.display(), "saved captured region");
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn clean_debug_image() -> Result<(), Box<dyn Error>> {
+        #[cfg(debug_assertions)]
+        {
+            let path = debug_image_trace_path();
+            if path.is_dir() {
+                std::fs::remove_dir_all(path.as_path())?;
+            }
+
+            tracing::info!(target = "probe", path = %path.display(), "cleaned debug image directory");
+        }
+
+        Ok(())
     }
 }
 
