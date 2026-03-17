@@ -21,7 +21,7 @@ pub struct TesseractPerceptor {
 }
 
 impl TesseractPerceptor {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             api: TesseractAPI::new(),
         }
@@ -37,7 +37,8 @@ impl TesseractPerceptor {
         let tessdata_dir = tessdata_dir()?;
 
         self.api.init(&tessdata_dir, "eng")?;
-        self.api.set_page_seg_mode(TessPageSegMode::PSM_SINGLE_BLOCK)?;
+        self.api
+            .set_page_seg_mode(TessPageSegMode::PSM_SINGLE_BLOCK)?;
         self.api.set_variable(
             "tessedit_char_whitelist",
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_ .:/\\",
@@ -48,13 +49,7 @@ impl TesseractPerceptor {
 }
 
 impl TextPerceptor for TesseractPerceptor {
-    fn recognize(&self, image: &image::DynamicImage) -> Result<String, Box<dyn Error>> {
-        let image = DynamicImage::ImageRgba8(resize(
-            image,
-            image.width().saturating_mul(2),
-            image.height().saturating_mul(2),
-            image::imageops::FilterType::Lanczos3,
-        ));
+    fn recognize(&self, image: &DynamicImage) -> Result<String, Box<dyn Error>> {
         let bmp_bytes = measure("encode_bmp", || encode_bmp(&image))?;
         let mut pix = measure("encode_pix", || unsafe {
             pixReadMemBmp(bmp_bytes.as_ptr(), bmp_bytes.len())
@@ -82,12 +77,13 @@ fn tessdata_dir() -> Result<PathBuf, Box<dyn Error>> {
         return Ok(PathBuf::from(dir));
     }
 
-    let appdata = env::var("APPDATA")
-        .map_err(|_| "APPDATA environment variable is not set, and TESSDATA_PREFIX was not provided.")?;
+    let appdata = env::var("APPDATA").map_err(
+        |_| "APPDATA environment variable is not set, and TESSDATA_PREFIX was not provided.",
+    )?;
     Ok(PathBuf::from(appdata).join("tesseract-rs").join("tessdata"))
 }
 
-fn encode_bmp(image: &image::DynamicImage) -> Result<Vec<u8>, Box<dyn Error>> {
+fn encode_bmp(image: &DynamicImage) -> Result<Vec<u8>, Box<dyn Error>> {
     let mut bytes = Vec::new();
     let encoder = BmpEncoder::new(&mut bytes);
     encoder.write_image(
