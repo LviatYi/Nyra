@@ -1,4 +1,4 @@
-use crate::measure::measure;
+use crate::measure::try_measure;
 use crate::perception::text_perceptor::TextPerceptor;
 use image::codecs::bmp::BmpEncoder;
 use image::{ColorType, DynamicImage, ImageEncoder};
@@ -17,6 +17,7 @@ unsafe extern "C" {
     fn pixReadMemBmp(data: *const u8, size: usize) -> *mut c_void;
 
     fn pixDestroy(pix: *mut *mut c_void);
+
     fn leptSetStderrHandler(handler: Option<extern "C" fn(*const c_char)>);
 }
 
@@ -24,6 +25,29 @@ static LEPTONICA_STDERR_INIT: Once = Once::new();
 
 pub struct TesseractPerceptor {
     api: TesseractAPI,
+}
+
+struct Pix(*mut c_void);
+
+impl Pix {
+    fn from_bmp_bytes(bmp_bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
+        let pix = unsafe { pixReadMemBmp(bmp_bytes.as_ptr(), bmp_bytes.len()) };
+        if pix.is_null() {
+            return Err("Leptonica pixReadMemBmp failed to load the in-memory BMP image.".into());
+        }
+
+        Ok(Self(pix))
+    }
+
+    fn as_ptr(&self) -> *mut c_void {
+        self.0
+    }
+}
+
+impl Drop for Pix {
+    fn drop(&mut self) {
+        unsafe { pixDestroy(&mut self.0) };
+    }
 }
 
 impl TesseractPerceptor {
@@ -58,24 +82,24 @@ impl TesseractPerceptor {
 
 impl TextPerceptor for TesseractPerceptor {
     fn recognize(&self, image: &DynamicImage) -> Result<String, Box<dyn Error>> {
-        let bmp_bytes = measure("encode_bmp", || encode_bmp(image))?;
-        let mut pix = measure("encode_pix", || unsafe {
-            pixReadMemBmp(bmp_bytes.as_ptr(), bmp_bytes.len())
-        });
+        let measured = try_measure("encode_grey", || encode_grey(image))?
+            .try_measure("encode_pix", |bmp_bytes| Pix::from_bmp_bytes(&bmp_bytes))?
+            .try_measure("prepare_pix", |pix| -> Result<_, Box<dyn Error>> {
+                self.api.set_image_2(pix.as_ptr())?;
+                self.api.set_source_resolution(144)?;
+                Ok(pix)
+            })?
+            .try_measure(
+                "tesseract_api_get_text",
+                |pix| -> Result<_, Box<dyn Error>> {
+                    let text = self.api.get_utf8_text()?.trim().to_string();
+                    drop(pix);
+                    Ok(text)
+                },
+            )?;
 
-        if pix.is_null() {
-            return Err("Leptonica pixReadMemBmp failed to load the in-memory BMP image.".into());
-        }
-
-        measure("prepare_pix", || -> tesseract_rs::Result<()> {
-            self.api.set_image_2(pix)?;
-            self.api.set_source_resolution(144)
-        })?;
-
-        let text = measure("tesseract_api_get_text", || {
-            self.api.get_utf8_text().map(|r| r.trim().to_string())
-        })?;
-        unsafe { pixDestroy(&mut pix) };
+        let (text, report) = measured.into_parts();
+        tracing::trace!(target = "tesseract_recognize", report = %report, "MEASURE_REPORT");
         Ok(text)
     }
 }
@@ -107,7 +131,11 @@ impl TesseractPerceptorPool {
 
         let perceptor = match perceptor {
             Some(perceptor) => perceptor,
-            None => measure("init_tesseract_perceptor", TesseractPerceptor::new_with_init)?,
+            None => try_measure(
+                "init_tesseract_perceptor",
+                TesseractPerceptor::new_with_init,
+            )?
+            .into_inner(),
         };
 
         Ok(PooledTesseractPerceptor {
@@ -162,7 +190,7 @@ fn tessdata_dir() -> Result<PathBuf, Box<dyn Error>> {
     Ok(PathBuf::from(appdata).join("tesseract-rs").join("tessdata"))
 }
 
-fn encode_bmp(image: &DynamicImage) -> Result<Vec<u8>, Box<dyn Error>> {
+fn encode_grey(image: &DynamicImage) -> Result<Vec<u8>, Box<dyn Error>> {
     let grey = image.to_luma8();
     let mut bytes = Vec::new();
     let encoder = BmpEncoder::new(&mut bytes);
