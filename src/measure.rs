@@ -1,5 +1,6 @@
 use std::fmt::{Display, Formatter};
 use std::future::Future;
+use tracing::{Instrument, field};
 
 const MEASURE_TRACING_TITLE: &str = "MEASURE";
 const TAB_WIDTH: usize = 4;
@@ -170,14 +171,19 @@ pub fn measure_with_report<R>(
     mut report: Report,
 ) -> MeasureReturn<R> {
     let label = label.as_ref();
+    let measure_span =
+        tracing::trace_span!("measure_step", step = label, elapsed_sec = field::Empty);
+    let _measure_guard = measure_span.enter();
 
     let start = std::time::Instant::now();
     let result = f();
     let elapsed_sec = start.elapsed().as_secs_f64();
+    measure_span.record("elapsed_sec", elapsed_sec);
 
     tracing::trace!(
-        target = label,
-        elapsed_sec = elapsed_sec,
+        parent: &measure_span,
+        step = label,
+        elapsed_sec,
         "{}",
         MEASURE_TRACING_TITLE
     );
@@ -222,14 +228,18 @@ where
     Fut: Future<Output = R>,
 {
     let label = label.as_ref();
+    let measure_span =
+        tracing::trace_span!("measure_step", step = label, elapsed_sec = field::Empty);
 
     let start = std::time::Instant::now();
-    let result = future.await;
+    let result = future.instrument(measure_span.clone()).await;
     let elapsed_sec = start.elapsed().as_secs_f64();
+    measure_span.record("elapsed_sec", elapsed_sec);
 
     tracing::trace!(
-        target = label,
-        elapsed_sec = elapsed_sec,
+        parent: &measure_span,
+        step = label,
+        elapsed_sec,
         "{}",
         MEASURE_TRACING_TITLE
     );

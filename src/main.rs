@@ -19,12 +19,24 @@ mod app {
     use std::fs;
     use std::path::Path;
     use tracing::level_filters::LevelFilter;
+    use tracing_subscriber::fmt::format::FmtSpan;
 
     pub fn bootstrap() -> Result<(), Box<dyn Error>> {
+        let max_level = if cfg!(debug_assertions) {
+            LevelFilter::TRACE
+        } else {
+            LevelFilter::INFO
+        };
+
         tracing_subscriber::fmt()
             .with_ansi(true)
-            .with_max_level(LevelFilter::INFO)
+            .with_max_level(max_level)
             .with_target(true)
+            .with_span_events(if cfg!(debug_assertions) {
+                FmtSpan::CLOSE
+            } else {
+                FmtSpan::NONE
+            })
             .try_init()
             .map_err(|error| format!("failed to initialize tracing: {error}"))?;
 

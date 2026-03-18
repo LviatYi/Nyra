@@ -6,6 +6,7 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 use tokio::time::{self, MissedTickBehavior};
+use tracing::field;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,6 +90,13 @@ impl SentryTask {
     where
         P: TextPerceptor,
     {
+        let run_span = tracing::debug_span!(
+            "sentry_run",
+            sentry_id = %self.id,
+            frequency_ms = self.frequency_ms,
+            patrol = ?self.patrol,
+        );
+        let _run_guard = run_span.enter();
         let interval_duration = self.interval_duration()?;
 
         if let Some(duration) = interval_duration {
@@ -98,11 +106,11 @@ impl SentryTask {
             loop {
                 interval.tick().await;
                 let output = self.evaluate(text_perceptor)?;
-                tracing::trace!(target = "sentry_run", result = %output);
+                tracing::debug!(target = "sentry_run", result = %output, "SENTRY_EVALUATED");
             }
         } else {
             let output = self.evaluate(text_perceptor)?;
-            tracing::trace!(target = "sentry_run", result = %output);
+            tracing::debug!(target = "sentry_run", result = %output, "SENTRY_EVALUATED");
             Ok(())
         }
     }
@@ -126,8 +134,18 @@ impl SentryTask {
     where
         P: TextPerceptor,
     {
+        let evaluate_span = tracing::debug_span!(
+            "sentry_evaluate",
+            sentry_id = %self.id,
+            matched = field::Empty,
+            recognized_text = field::Empty
+        );
+        let _evaluate_guard = evaluate_span.enter();
+
         let recognized_text = text_perceptor.recognize(image)?;
         let matched = matches_focus(&recognized_text, &self.focus_on);
+        evaluate_span.record("matched", matched);
+        evaluate_span.record("recognized_text", recognized_text.as_str());
 
         let output = SentryRunOutput {
             recognized_text: recognized_text.clone(),

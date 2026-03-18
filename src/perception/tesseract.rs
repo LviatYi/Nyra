@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::Once;
 use tesseract_rs::{TessPageSegMode, TesseractAPI};
+use tracing::field;
 
 #[link(name = "leptonica")]
 unsafe extern "C" {
@@ -82,6 +83,14 @@ impl TesseractPerceptor {
 
 impl TextPerceptor for TesseractPerceptor {
     fn recognize(&self, image: &DynamicImage) -> Result<String, Box<dyn Error>> {
+        let recognize_span = tracing::debug_span!(
+            "tesseract_recognize",
+            width = image.width(),
+            height = image.height(),
+            text_length = field::Empty
+        );
+        let _recognize_guard = recognize_span.enter();
+
         let measured = try_measure("encode_grey", || encode_grey(image))?
             .try_measure("encode_pix", |bmp_bytes| Pix::from_bmp_bytes(&bmp_bytes))?
             .try_measure("prepare_pix", |pix| -> Result<_, Box<dyn Error>> {
@@ -98,8 +107,8 @@ impl TextPerceptor for TesseractPerceptor {
                 },
             )?;
 
-        let (text, report) = measured.into_parts();
-        tracing::trace!(target = "tesseract_recognize", report = %report, "MEASURE_REPORT");
+        let text = measured.into_inner();
+        recognize_span.record("text_length", text.len());
         Ok(text)
     }
 }
