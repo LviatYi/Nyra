@@ -123,8 +123,8 @@ impl Report {
         });
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
+    pub fn print_by_tracing(&self) {
+        tracing::info!(report = %self, "{}", MEASURE_TRACING_TITLE);
     }
 }
 
