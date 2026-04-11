@@ -1,2 +1,5 @@
 /target/
 /.idea/
+/.build/
+/.deps/
+/.ocr-release/

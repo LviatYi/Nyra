@@ -56,7 +56,7 @@ impl TextPerceptor for TesseractPerceptor {
             image::imageops::FilterType::Lanczos3,
         ));
         let bmp_bytes = measure("encode_bmp", || encode_bmp(&image))?;
-        let mut pix = measure("encode_pix", || unsafe {
+        let mut pix = measure("prepare_pix", || unsafe {
             pixReadMemBmp(bmp_bytes.as_ptr(), bmp_bytes.len())
         });
 
@@ -64,7 +64,7 @@ impl TextPerceptor for TesseractPerceptor {
             return Err("Leptonica pixReadMemBmp failed to load the in-memory BMP image.".into());
         }
 
-        measure("prepare_pix", || -> tesseract_rs::Result<()> {
+        measure("prepare_image", || -> tesseract_rs::Result<()> {
             self.api.set_image_2(pix)?;
             self.api.set_source_resolution(144)
         })?;
@@ -87,13 +87,14 @@ fn tessdata_dir() -> Result<PathBuf, Box<dyn Error>> {
     Ok(PathBuf::from(appdata).join("tesseract-rs").join("tessdata"))
 }
 
-fn encode_bmp(image: &image::DynamicImage) -> Result<Vec<u8>, Box<dyn Error>> {
+fn encode_bmp(image: &DynamicImage) -> Result<Vec<u8>, Box<dyn Error>> {
+    let grayscale = image.to_luma8();
     let mut bytes = Vec::new();
     let encoder = BmpEncoder::new(&mut bytes);
     encoder.write_image(
-        image.to_luma8().as_raw(),
-        image.width(),
-        image.height(),
+        grayscale.as_raw(),
+        grayscale.width(),
+        grayscale.height(),
         ColorType::L8.into(),
     )?;
     Ok(bytes)

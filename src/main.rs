@@ -1,6 +1,7 @@
 pub mod perception;
 pub mod measure;
 mod capture;
+pub mod overlay;
 
 #[cfg(not(target_os = "windows"))]
 fn main() {
