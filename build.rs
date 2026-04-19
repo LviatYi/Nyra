@@ -44,7 +44,9 @@ fn main() {
             for path in missing {
                 println!("cargo:warning=  - {path}");
             }
-            println!("cargo:warning=Run .\\scripts\\setup-dev.ps1 before building if the OCR toolchain is not initialized on this machine.");
+            println!(
+                "cargo:warning=Run .\\scripts\\setup-dev.ps1 before building if the OCR toolchain is not initialized on this machine."
+            );
         }
     }
 }
