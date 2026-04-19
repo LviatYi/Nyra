@@ -4,7 +4,6 @@ mod measure;
 mod overlay_shell;
 mod perception;
 mod platform;
-mod ui_frontend;
 pub mod overlay;
 pub mod job;
 
