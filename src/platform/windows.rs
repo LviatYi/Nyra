@@ -11,7 +11,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowThreadProcessId, GWLP_WNDPROC, GWL_EXSTYLE, HWND_TOPMOST, IsWindowVisible,
     LWA_ALPHA, SWP_FRAMECHANGED, SWP_NOMOVE, SWP_NOOWNERZORDER, SWP_NOSIZE, SWP_NOZORDER,
     SetLayeredWindowAttributes, SetWindowLongPtrW, SetWindowLongW, SetWindowPos, WINDOW_EX_STYLE,
-    WM_HOTKEY, WNDPROC, WS_EX_APPWINDOW, WS_EX_LAYERED, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    WM_HOTKEY, WNDPROC, WS_EX_LAYERED, WS_EX_TRANSPARENT,
 };
 use windows::core::BOOL;
 
@@ -66,8 +66,6 @@ impl WindowsOverlayController {
             let current = WINDOW_EX_STYLE(GetWindowLongW(hwnd, GWL_EXSTYLE) as u32);
             let mut next = current;
             next |= WS_EX_LAYERED;
-            next |= WS_EX_TOOLWINDOW;
-            next &= !WS_EX_APPWINDOW;
 
             match mode {
                 OverlayMode::Edit => next &= !WS_EX_TRANSPARENT,
