@@ -1,0 +1,18 @@
+{
+  "tips": [
+    {
+      "tip": "TIP 1",
+      "interval": 8,
+      "showTime": 8
+    },
+    {
+      "tip": "TIP 2",
+      "interval": 6,
+      "showTime": 6
+    },
+    {
+      "tip": "TIP 3",
+      "interval": 8
+    }
+  ]
+}

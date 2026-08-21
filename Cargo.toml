@@ -1,0 +1,15 @@
+[package]
+name = "nyra"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { version = "0.19.0", default-features = false, features = ["ui", "system_font_discovery"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+unicode-width = "0.2"
+
+# arrayref 0.3.10 currently points at a nonexistent proc-macro1 crate.
+# Pin the upstream 0.3.9 source until the registry release is corrected.
+[patch.crates-io]
+arrayref = { git = "https://github.com/droundy/arrayref", rev = "f8d0299d863922db6c409d08098941e833b70d69" }
