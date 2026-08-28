@@ -14,7 +14,11 @@ use crate::sensory::SensoryPlugin;
 use crate::settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use bevy::{
     prelude::*,
-    window::{WindowLevel, WindowResolution},
+    render::{
+        RenderPlugin,
+        settings::{Backends, WgpuSettings},
+    },
+    window::{CompositeAlphaMode, WindowLevel, WindowResolution},
     winit::{UpdateMode, WinitSettings},
 };
 
@@ -30,6 +34,8 @@ struct RotationState {
 struct TipText;
 
 fn main() -> ExitCode {
+    configure_windows_transparency();
+
     let config_path = env::args_os()
         .nth(1)
         .map(PathBuf::from)
@@ -44,6 +50,16 @@ fn main() -> ExitCode {
             eprintln!("Nyra 启动失败：{error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+fn configure_windows_transparency() {
+    // Bevy 0.19 / wgpu defaults to an HWND swap chain on Windows. That path is
+    // always opaque; a DirectComposition visual is required for per-pixel alpha.
+    // This runs before Bevy starts its worker threads, so mutating the process
+    // environment cannot race with another thread here.
+    unsafe {
+        env::set_var("WGPU_DX12_PRESENTATION_SYSTEM", "visual");
     }
 }
 
@@ -91,19 +107,31 @@ fn run(config: Tips) {
             focused_mode: UpdateMode::reactive(Duration::from_millis(33)),
             unfocused_mode: UpdateMode::reactive_low_power(Duration::from_millis(50)),
         })
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Nyra".into(),
-                resolution: WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT),
-                decorations: false,
-                transparent: true,
-                resizable: false,
-                window_level: WindowLevel::AlwaysOnTop,
-                skip_taskbar: true,
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(RenderPlugin {
+                    render_creation: WgpuSettings {
+                        backends: Some(Backends::DX12),
+                        ..default()
+                    }
+                    .into(),
+                    ..default()
+                })
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Nyra".into(),
+                        resolution: WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT),
+                        decorations: false,
+                        transparent: true,
+                        composite_alpha_mode: CompositeAlphaMode::PreMultiplied,
+                        resizable: false,
+                        window_level: WindowLevel::AlwaysOnTop,
+                        skip_taskbar: true,
+                        ..default()
+                    }),
+                    ..default()
+                }),
+        )
         .add_plugins(SensoryPlugin)
         .run();
 }
