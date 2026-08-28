@@ -34,7 +34,7 @@ struct RotationState {
 struct TipText;
 
 fn main() -> ExitCode {
-    configure_windows_transparency();
+    configure_render_environment();
 
     let config_path = env::args_os()
         .nth(1)
@@ -53,13 +53,21 @@ fn main() -> ExitCode {
     }
 }
 
-fn configure_windows_transparency() {
-    // Bevy 0.19 / wgpu defaults to an HWND swap chain on Windows. That path is
-    // always opaque; a DirectComposition visual is required for per-pixel alpha.
-    // This runs before Bevy starts its worker threads, so mutating the process
-    // environment cannot race with another thread here.
-    unsafe {
-        env::set_var("WGPU_DX12_PRESENTATION_SYSTEM", "visual");
+fn configure_render_environment() {
+    #[cfg(target_os = "windows")]
+    {
+        // Bevy 0.19 does not expose wgpu's DX12 presentation-system setting.
+        // The default HWND swap chain only supports opaque composition, so a
+        // transparent window using premultiplied alpha needs DirectComposition's
+        // Visual presentation path instead. wgpu reads this variable while its
+        // instance is created, which is why this function must run before Bevy.
+        //
+        // Rust 2024 marks process-environment mutation as unsafe for platforms
+        // where concurrent access can cause undefined behavior. This block is
+        // compiled only on Windows, where `set_var` is documented as always safe.
+        unsafe {
+            env::set_var("WGPU_DX12_PRESENTATION_SYSTEM", "visual");
+        }
     }
 }
 
@@ -101,7 +109,6 @@ fn run(config: Tips) {
     App::new()
         .insert_resource(ClearColor(Color::NONE))
         .insert_resource(JobConfig(config))
-        .init_resource::<RotationState>()
         // The border changes continuously, but a desktop overlay does not need a game-rate loop.
         .insert_resource(WinitSettings {
             focused_mode: UpdateMode::reactive(Duration::from_millis(33)),
