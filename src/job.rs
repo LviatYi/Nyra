@@ -1,7 +1,8 @@
 use bevy::prelude::Resource;
 use serde::Deserialize;
 
-pub type TipTick = f32;
+/// Seconds.
+pub type TipTick = u64;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,3 +26,9 @@ pub struct Tips {
 
 #[derive(Resource)]
 pub struct JobConfig(pub Tips);
+
+impl JobConfig {
+    pub fn is_empty(&self) -> bool {
+        self.0.tips.is_empty()
+    }
+}
