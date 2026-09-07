@@ -10,8 +10,10 @@ use bevy::{
     sprite_render::AlphaMode2d,
     window::PrimaryWindow,
 };
-use std::f32::consts::{FRAC_PI_2, PI};
-use std::time::Instant;
+use std::{
+    f32::consts::{FRAC_PI_2, PI},
+    time::Duration,
+};
 use unicode_width::UnicodeWidthChar;
 
 const COLOR_MAIN_TIP_BACKGROUND: Color = Color::srgba(0.045, 0.055, 0.075, 0.92);
@@ -177,27 +179,31 @@ fn truncate_tip(value: &str) -> String {
     output
 }
 
-pub(super) fn process_jobs(jobs: Res<JobConfig>, mut state: ResMut<JobSensoryState>) {
+pub(super) fn process_jobs(
+    time: Res<Time<Real>>,
+    jobs: Res<JobConfig>,
+    mut state: ResMut<JobSensoryState>,
+) {
+    process_jobs_at(&jobs, &mut state, time.elapsed());
+}
+
+fn process_jobs_at(jobs: &JobConfig, state: &mut JobSensoryState, now: Duration) {
     match state.focus_state.as_ref() {
         None => {
             if !jobs.is_empty() {
-                state.restart();
+                state.restart(now);
             }
 
             return;
         }
         Some(inner_s) => match jobs.0.tips.get(inner_s.current_index) {
             None => {
-                state.restart();
+                state.restart(now);
             }
             Some(tip) => {
-                if Instant::now()
-                    .duration_since(inner_s.focus_at_time)
-                    .as_secs_f32()
-                    >= tip.show_time() as f32
-                {
+                if inner_s.elapsed_at(now) >= Duration::from_secs(tip.show_time()) {
                     let next_index = (inner_s.current_index + 1) % jobs.0.tips.len();
-                    state.restart_at(next_index);
+                    state.restart_at(next_index, now);
                 }
             }
         },
@@ -205,6 +211,7 @@ pub(super) fn process_jobs(jobs: Res<JobConfig>, mut state: ResMut<JobSensorySta
 }
 
 pub fn render_job(
+    time: Res<Time<Real>>,
     jobs: Res<JobConfig>,
     state: Res<JobSensoryState>,
     mut text: Single<&mut Text, With<TipText>>,
@@ -222,7 +229,7 @@ pub fn render_job(
         text.0 = truncate_tip(&tip.tip);
     }
 
-    let elapsed = focus_state.focus_at_time.elapsed().as_secs_f32();
+    let elapsed = focus_state.elapsed_at(time.elapsed()).as_secs_f32();
     let progress = (1.0 - elapsed / tip.show_time() as f32).clamp(0.0, 1.0);
     let (mut progress_border, border_mesh) = progress_border.into_inner();
     if progress != progress_border.progress {

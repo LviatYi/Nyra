@@ -1,9 +1,15 @@
 use bevy::prelude::*;
-use std::time::Instant;
+use std::time::Duration;
 
 pub struct FocusState {
     pub current_index: usize,
-    pub focus_at_time: Instant,
+    pub started_at: Duration,
+}
+
+impl FocusState {
+    pub fn elapsed_at(&self, now: Duration) -> Duration {
+        now.saturating_sub(self.started_at)
+    }
 }
 
 #[derive(Resource, Default)]
@@ -12,14 +18,14 @@ pub struct JobSensoryState {
 }
 
 impl JobSensoryState {
-    pub fn restart_at(&mut self, index: usize) {
+    pub fn restart_at(&mut self, index: usize, now: Duration) {
         self.focus_state = Some(FocusState {
             current_index: index,
-            focus_at_time: Instant::now(),
+            started_at: now,
         });
     }
 
-    pub fn restart(&mut self) {
-        self.restart_at(0);
+    pub fn restart(&mut self, now: Duration) {
+        self.restart_at(0, now);
     }
 }
