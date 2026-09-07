@@ -392,7 +392,7 @@ fn push_border_segment_indices(indices: &mut Vec<u32>, from: u32, to: u32) {
 fn rounded_rectangle_outline(half_size: Vec2, radius: f32) -> Vec<OutlinePoint> {
     let mut points = Vec::with_capacity(CORNER_SEGMENTS * 4 + 6);
     points.push(OutlinePoint {
-        position: Vec2::new(0.0, half_size.y),
+        position: Vec2::new(radius - half_size.x, half_size.y),
         outward: Vec2::Y,
     });
     points.push(OutlinePoint {
@@ -435,10 +435,6 @@ fn rounded_rectangle_outline(half_size: Vec2, radius: f32) -> Vec<OutlinePoint> 
         radius,
         PI,
     );
-    points.push(OutlinePoint {
-        position: Vec2::new(0.0, half_size.y),
-        outward: Vec2::Y,
-    });
     points
 }
 
