@@ -3,8 +3,12 @@ use crate::job::{JobConfig, Tip};
 use crate::sensory::job::{FocusState, JobSensoryState};
 use crate::settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use bevy::{
-    asset::RenderAssetUsages, mesh::Indices, prelude::*,
-    render::render_resource::PrimitiveTopology, sprite_render::AlphaMode2d, window::PrimaryWindow,
+    asset::RenderAssetUsages,
+    mesh::{Indices, VertexAttributeValues},
+    prelude::*,
+    render::render_resource::PrimitiveTopology,
+    sprite_render::AlphaMode2d,
+    window::PrimaryWindow,
 };
 use std::f32::consts::{FRAC_PI_2, PI};
 use std::time::Instant;
@@ -27,12 +31,51 @@ pub struct TipText;
 pub struct ProgressBorder {
     /// Visible fraction of the rounded outline, in the inclusive range `0.0..=1.0`.
     progress: f32,
+    index_state: BorderIndexState,
+    geometry: ProgressBorderGeometry,
 }
 
 #[derive(Clone, Copy)]
 struct OutlinePoint {
     position: Vec2,
     outward: Vec2,
+}
+
+#[derive(Clone, Copy)]
+struct BorderVertexPair {
+    outer: [f32; 3],
+    inner: [f32; 3],
+}
+
+impl BorderVertexPair {
+    fn lerp(self, other: Self, factor: f32) -> Self {
+        Self {
+            outer: Vec3::from(self.outer)
+                .lerp(Vec3::from(other.outer), factor)
+                .to_array(),
+            inner: Vec3::from(self.inner)
+                .lerp(Vec3::from(other.inner), factor)
+                .to_array(),
+        }
+    }
+}
+
+struct ProgressBorderGeometry {
+    /// Rounded-outline vertices keyed by their normalized distance from the start.
+    samples: Vec<(f32, BorderVertexPair)>,
+    full_indices: Vec<u32>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct BorderIndexState {
+    full_segments: usize,
+    has_terminal_segment: bool,
+}
+
+#[derive(Clone, Copy)]
+struct ProgressBorderSlice {
+    index_state: BorderIndexState,
+    terminal: Option<BorderVertexPair>,
 }
 
 pub fn setup_overlay(
@@ -58,11 +101,20 @@ pub fn setup_overlay(
         alpha_mode: AlphaMode2d::Blend,
         ..default()
     };
+    let border_geometry = progress_border_geometry();
+    let border_index_state = BorderIndexState {
+        full_segments: border_geometry.samples.len() - 1,
+        has_terminal_segment: false,
+    };
     commands.spawn((
-        Mesh2d(meshes.add(progress_border_mesh(1.0))),
+        Mesh2d(meshes.add(progress_border_mesh(&border_geometry))),
         MeshMaterial2d(materials.add(border_material)),
         Transform::from_xyz(0.0, 0.0, 1.0),
-        ProgressBorder { progress: 1.0 },
+        ProgressBorder {
+            progress: 1.0,
+            index_state: border_index_state,
+            geometry: border_geometry,
+        },
         TipOverlay,
     ));
 
@@ -179,7 +231,7 @@ pub fn render_job(
     if progress != progress_border.progress {
         progress_border.progress = progress;
         if let Some(mut mesh) = meshes.get_mut(&border_mesh.0) {
-            *mesh = progress_border_mesh(progress);
+            update_progress_border_mesh(&mut mesh, &mut progress_border, progress);
         }
     }
 }
@@ -204,34 +256,137 @@ fn rounded_rectangle_mesh(size: Vec2, radius: f32) -> Mesh {
     triangle_mesh(positions, indices)
 }
 
-fn progress_border_mesh(length: f32) -> Mesh {
+fn progress_border_geometry() -> ProgressBorderGeometry {
     let half_size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32) / 2.0;
     let centerline_radius = CORNER_RADIUS - BORDER_WIDTH / 2.0;
     let centerline = rounded_rectangle_outline(
         half_size - Vec2::splat(BORDER_WIDTH / 2.0),
         centerline_radius,
     );
-    let visible_outline = outline_prefix(&centerline, length);
 
-    let mut positions = Vec::with_capacity(visible_outline.len() * 2);
-    for point in &visible_outline {
-        let offset = point.outward * (BORDER_WIDTH / 2.0);
-        let outer = point.position + offset;
-        let inner = point.position - offset;
-        positions.push([outer.x, outer.y, 0.0]);
-        positions.push([inner.x, inner.y, 0.0]);
+    let total_length = centerline
+        .windows(2)
+        .map(|points| points[0].position.distance(points[1].position))
+        .sum::<f32>();
+    let mut traversed = 0.0;
+    let mut samples = Vec::with_capacity(centerline.len());
+    samples.push((0.0, border_vertex_pair(centerline[0])));
+    for points in centerline.windows(2) {
+        traversed += points[0].position.distance(points[1].position);
+        samples.push(((traversed / total_length).min(1.0), border_vertex_pair(points[1])));
     }
 
-    let mut indices = Vec::with_capacity(visible_outline.len().saturating_sub(1) * 6);
-    for index in 0..visible_outline.len().saturating_sub(1) as u32 {
-        let outer = index * 2;
-        let inner = outer + 1;
-        let next_outer = outer + 2;
-        let next_inner = outer + 3;
-        indices.extend_from_slice(&[outer, inner, next_outer, inner, next_inner, next_outer]);
+    let mut full_indices = Vec::with_capacity((samples.len() - 1) * 6);
+    for segment in 0..samples.len() - 1 {
+        push_border_segment_indices(&mut full_indices, segment as u32, segment as u32 + 1);
     }
 
-    triangle_mesh(positions, indices)
+    ProgressBorderGeometry {
+        samples,
+        full_indices,
+    }
+}
+
+fn border_vertex_pair(point: OutlinePoint) -> BorderVertexPair {
+    let offset = point.outward * (BORDER_WIDTH / 2.0);
+    let outer = point.position + offset;
+    let inner = point.position - offset;
+    BorderVertexPair {
+        outer: [outer.x, outer.y, 0.0],
+        inner: [inner.x, inner.y, 0.0],
+    }
+}
+
+fn progress_border_mesh(geometry: &ProgressBorderGeometry) -> Mesh {
+    let mut positions = Vec::with_capacity(geometry.samples.len() * 2 + 2);
+    for (_, pair) in &geometry.samples {
+        positions.extend_from_slice(&[pair.outer, pair.inner]);
+    }
+
+    // These last two vertices are the only positions changed while progress moves
+    // within a cached segment.
+    let last_pair = geometry.samples.last().unwrap().1;
+    positions.extend_from_slice(&[last_pair.outer, last_pair.inner]);
+
+    triangle_mesh(positions, geometry.full_indices.clone())
+}
+
+fn update_progress_border_mesh(mesh: &mut Mesh, border: &mut ProgressBorder, progress: f32) {
+    let slice = progress_border_slice(&border.geometry, progress);
+
+    if let Some(terminal) = slice.terminal
+        && let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
+    {
+        let terminal_index = border.geometry.samples.len() * 2;
+        positions[terminal_index] = terminal.outer;
+        positions[terminal_index + 1] = terminal.inner;
+    }
+
+    if slice.index_state == border.index_state {
+        return;
+    }
+
+    let Some(Indices::U32(indices)) = mesh.indices_mut() else {
+        return;
+    };
+    let cached_index_count = slice.index_state.full_segments * 6;
+    indices.clear();
+    indices.extend_from_slice(&border.geometry.full_indices[..cached_index_count]);
+    if slice.index_state.has_terminal_segment {
+        push_border_segment_indices(
+            indices,
+            slice.index_state.full_segments as u32,
+            border.geometry.samples.len() as u32,
+        );
+    }
+    border.index_state = slice.index_state;
+}
+
+fn progress_border_slice(geometry: &ProgressBorderGeometry, progress: f32) -> ProgressBorderSlice {
+    let progress = progress.clamp(0.0, 1.0);
+    if progress == 0.0 {
+        return ProgressBorderSlice {
+            index_state: BorderIndexState {
+                full_segments: 0,
+                has_terminal_segment: false,
+            },
+            terminal: None,
+        };
+    }
+    if progress == 1.0 {
+        return ProgressBorderSlice {
+            index_state: BorderIndexState {
+                full_segments: geometry.samples.len() - 1,
+                has_terminal_segment: false,
+            },
+            terminal: None,
+        };
+    }
+
+    let upper_index = geometry
+        .samples
+        .partition_point(|(cached_progress, _)| *cached_progress < progress);
+    let lower_index = upper_index - 1;
+    let (lower_progress, lower_pair) = geometry.samples[lower_index];
+    let (upper_progress, upper_pair) = geometry.samples[upper_index];
+    let factor = (progress - lower_progress) / (upper_progress - lower_progress);
+
+    ProgressBorderSlice {
+        index_state: BorderIndexState {
+            full_segments: lower_index,
+            has_terminal_segment: true,
+        },
+        terminal: Some(lower_pair.lerp(upper_pair, factor)),
+    }
+}
+
+fn push_border_segment_indices(indices: &mut Vec<u32>, from: u32, to: u32) {
+    let outer = from * 2;
+    let inner = outer + 1;
+    let next_outer = to * 2;
+    let next_inner = next_outer + 1;
+    indices.extend_from_slice(&[outer, inner, next_outer, inner, next_inner, next_outer]);
 }
 
 fn rounded_rectangle_outline(half_size: Vec2, radius: f32) -> Vec<OutlinePoint> {
@@ -296,40 +451,6 @@ fn push_corner(points: &mut Vec<OutlinePoint>, center: Vec2, radius: f32, start_
             outward,
         });
     }
-}
-
-fn outline_prefix(outline: &[OutlinePoint], length: f32) -> Vec<OutlinePoint> {
-    let target_length = outline
-        .windows(2)
-        .map(|points| points[0].position.distance(points[1].position))
-        .sum::<f32>()
-        * length.clamp(0.0, 1.0);
-
-    if target_length == 0.0 {
-        return Vec::new();
-    }
-
-    let mut result = vec![outline[0]];
-    let mut remaining = target_length;
-    for points in outline.windows(2) {
-        let segment_length = points[0].position.distance(points[1].position);
-        if remaining >= segment_length {
-            result.push(points[1]);
-            remaining -= segment_length;
-            continue;
-        }
-
-        let factor = remaining / segment_length;
-        result.push(OutlinePoint {
-            position: points[0].position.lerp(points[1].position, factor),
-            outward: points[0]
-                .outward
-                .lerp(points[1].outward, factor)
-                .normalize(),
-        });
-        break;
-    }
-    result
 }
 
 fn triangle_mesh(positions: Vec<[f32; 3]>, indices: Vec<u32>) -> Mesh {
