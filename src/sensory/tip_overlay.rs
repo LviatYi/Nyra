@@ -193,8 +193,8 @@ pub(super) fn process_jobs(jobs: Res<JobConfig>, mut state: ResMut<JobSensorySta
             Some(tip) => {
                 if Instant::now()
                     .duration_since(inner_s.focus_at_time)
-                    .as_secs()
-                    > tip.show_time()
+                    .as_secs_f32()
+                    >= tip.show_time() as f32
                 {
                     let next_index = (inner_s.current_index + 1) % jobs.0.tips.len();
                     state.restart_at(next_index);
