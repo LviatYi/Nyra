@@ -1,7 +1,7 @@
-pub mod overlay;
+pub mod tip_overlay;
 mod job;
 
-use crate::sensory::overlay::{drag_overlay, process_jobs, render_job, setup_overlay};
+use crate::sensory::tip_overlay::{drag_overlay, process_jobs, render_job, setup_overlay};
 use bevy::prelude::*;
 use crate::sensory::job::JobSensoryState;
 

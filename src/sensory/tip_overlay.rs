@@ -1,7 +1,7 @@
 use crate::MAX_TEXT_COLUMNS;
 use crate::job::{JobConfig, Tip};
 use crate::sensory::job::{FocusState, JobSensoryState};
-use crate::settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH};
+use crate::settings_default_values::*;
 use bevy::{
     asset::RenderAssetUsages,
     mesh::{Indices, VertexAttributeValues},
@@ -14,9 +14,6 @@ use std::f32::consts::{FRAC_PI_2, PI};
 use std::time::Instant;
 use unicode_width::UnicodeWidthChar;
 
-const BORDER_WIDTH: f32 = 3.0;
-const CORNER_RADIUS: f32 = 12.0;
-const CORNER_SEGMENTS: usize = 12;
 const COLOR_MAIN_TIP_BACKGROUND: Color = Color::srgba(0.045, 0.055, 0.075, 0.92);
 const COLOR_MAIN_TIP_TEXT: Color = Color::srgb(0.94, 0.96, 1.0);
 const COLOR_PROGRESS_BORDER: Color = Color::srgb(0.20, 0.88, 0.48);
@@ -88,7 +85,7 @@ pub fn setup_overlay(
 
     let size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32);
     commands.spawn((
-        Mesh2d(meshes.add(rounded_rectangle_mesh(size, CORNER_RADIUS))),
+        Mesh2d(meshes.add(rounded_rectangle_mesh(size, TIP_OVERLAY_CORNER_RADIUS))),
         MeshMaterial2d(materials.add(ColorMaterial::from(COLOR_MAIN_TIP_BACKGROUND))),
         Transform::from_xyz(0.0, 0.0, 0.0),
         TipOverlay,
@@ -258,9 +255,9 @@ fn rounded_rectangle_mesh(size: Vec2, radius: f32) -> Mesh {
 
 fn progress_border_geometry() -> ProgressBorderGeometry {
     let half_size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32) / 2.0;
-    let centerline_radius = CORNER_RADIUS - BORDER_WIDTH / 2.0;
+    let centerline_radius = TIP_OVERLAY_CORNER_RADIUS - TIP_OVERLAY_BORDER_WIDTH / 2.0;
     let centerline = rounded_rectangle_outline(
-        half_size - Vec2::splat(BORDER_WIDTH / 2.0),
+        half_size - Vec2::splat(TIP_OVERLAY_BORDER_WIDTH / 2.0),
         centerline_radius,
     );
 
@@ -288,7 +285,7 @@ fn progress_border_geometry() -> ProgressBorderGeometry {
 }
 
 fn border_vertex_pair(point: OutlinePoint) -> BorderVertexPair {
-    let offset = point.outward * (BORDER_WIDTH / 2.0);
+    let offset = point.outward * (TIP_OVERLAY_BORDER_WIDTH / 2.0);
     let outer = point.position + offset;
     let inner = point.position - offset;
     BorderVertexPair {
@@ -390,7 +387,7 @@ fn push_border_segment_indices(indices: &mut Vec<u32>, from: u32, to: u32) {
 }
 
 fn rounded_rectangle_outline(half_size: Vec2, radius: f32) -> Vec<OutlinePoint> {
-    let mut points = Vec::with_capacity(CORNER_SEGMENTS * 4 + 6);
+    let mut points = Vec::with_capacity(TIP_OVERLAY_CORNER_SEGMENTS * 4 + 6);
     points.push(OutlinePoint {
         position: Vec2::new(radius - half_size.x, half_size.y),
         outward: Vec2::Y,
@@ -439,8 +436,8 @@ fn rounded_rectangle_outline(half_size: Vec2, radius: f32) -> Vec<OutlinePoint> 
 }
 
 fn push_corner(points: &mut Vec<OutlinePoint>, center: Vec2, radius: f32, start_angle: f32) {
-    for step in 1..=CORNER_SEGMENTS {
-        let angle = start_angle - FRAC_PI_2 * step as f32 / CORNER_SEGMENTS as f32;
+    for step in 1..=TIP_OVERLAY_CORNER_SEGMENTS {
+        let angle = start_angle - FRAC_PI_2 * step as f32 / TIP_OVERLAY_CORNER_SEGMENTS as f32;
         let outward = Vec2::new(angle.cos(), angle.sin());
         points.push(OutlinePoint {
             position: center + outward * radius,
