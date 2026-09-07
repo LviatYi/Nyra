@@ -1,6 +1,7 @@
 // some default values will be moved to the settings in the future.
 
 use crate::job::TipTick;
+use std::time::Duration;
 
 //region Windows
 pub const WINDOW_WIDTH: u32 = 160;
@@ -18,4 +19,7 @@ pub const TIP_OVERLAY_CORNER_RADIUS: f32 = 12.0;
 pub const TIP_OVERLAY_CORNER_SEGMENTS: usize = 12;
 pub const TIP_OVERLAY_BACKGROUND_BRIGHTNESS: f32 = 0.18;
 pub const TIP_OVERLAY_BACKGROUND_ALPHA: f32 = 0.60;
+pub const TIP_OVERLAY_RIPPLE_SEGMENTS: usize = 96;
+pub const TIP_OVERLAY_RIPPLE_EXPAND_DURATION: Duration = Duration::from_millis(360);
+pub const TIP_OVERLAY_RIPPLE_FADE_DURATION: Duration = Duration::from_millis(240);
 //endregion
