@@ -28,6 +28,7 @@ Nyra 是一个以增强桌面程序用户感知为长期目标的 Rust 项目。
         - **tipString** tip 内容
         - **interval** 展示间隔，根据间隔与配置顺序决定 tip 展示顺序
         - **showTime** (optional) 展示时间
+        - **color** (optional) `#RRGGBB` 格式的主题色
 
 所有时间单位为秒。
 
@@ -54,6 +55,8 @@ cargo run -- path/to/config.json
 `showTime`，其值必须不大于 `interval`，剩余间隔内浮窗会透明隐藏。
 
 进度边框表示当前项 `showTime` 的剩余比例。文本过长时会截断并显示 `...`。
+未配置 `color` 时，程序会按配置顺序循环使用内置默认色板。进度边框的剩余部分
+使用当前项颜色，已播放部分使用下一项颜色；文本背景使用加深后的当前项颜色。
 
 ## 当前限制
 

@@ -16,9 +16,7 @@ use std::{
 };
 use unicode_width::UnicodeWidthChar;
 
-const COLOR_MAIN_TIP_BACKGROUND: Color = Color::srgba(0.045, 0.055, 0.075, 0.92);
 const COLOR_MAIN_TIP_TEXT: Color = Color::srgb(0.94, 0.96, 1.0);
-const COLOR_PROGRESS_BORDER: Color = Color::srgb(0.20, 0.88, 0.48);
 
 #[derive(Component)]
 pub struct TipOverlay;
@@ -32,6 +30,9 @@ pub struct ProgressBorder {
     progress: f32,
     index_state: BorderIndexState,
     geometry: ProgressBorderGeometry,
+    background_material: Handle<ColorMaterial>,
+    played_material: Handle<ColorMaterial>,
+    remaining_material: Handle<ColorMaterial>,
 }
 
 #[derive(Clone, Copy)]
@@ -85,34 +86,43 @@ pub fn setup_overlay(
 ) {
     commands.spawn(Camera2d);
 
+    let current_color = tip_color(&tips, 0);
+    let next_index = 1 % tips.0.tips.len();
+    let next_color = tip_color(&tips, next_index);
     let size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32);
+    let background_material =
+        materials.add(ColorMaterial::from(tip_background_color(current_color)));
     commands.spawn((
         Mesh2d(meshes.add(rounded_rectangle_mesh(size, TIP_OVERLAY_CORNER_RADIUS))),
-        MeshMaterial2d(materials.add(ColorMaterial::from(COLOR_MAIN_TIP_BACKGROUND))),
+        MeshMaterial2d(background_material.clone()),
         Transform::from_xyz(0.0, 0.0, 0.0),
         TipOverlay,
     ));
 
-    let border_material = ColorMaterial {
-        color: COLOR_PROGRESS_BORDER,
-        // Keep the background and border in the same transparent render phase so
-        // their Z values determine their order.
-        alpha_mode: AlphaMode2d::Blend,
-        ..default()
-    };
     let border_geometry = progress_border_geometry();
     let border_index_state = BorderIndexState {
         full_segments: border_geometry.samples.len() - 1,
         has_terminal_segment: false,
     };
+    let played_material = materials.add(border_material(next_color));
     commands.spawn((
         Mesh2d(meshes.add(progress_border_mesh(&border_geometry))),
-        MeshMaterial2d(materials.add(border_material)),
+        MeshMaterial2d(played_material.clone()),
         Transform::from_xyz(0.0, 0.0, 1.0),
+        TipOverlay,
+    ));
+    let remaining_material = materials.add(border_material(current_color));
+    commands.spawn((
+        Mesh2d(meshes.add(progress_border_mesh(&border_geometry))),
+        MeshMaterial2d(remaining_material.clone()),
+        Transform::from_xyz(0.0, 0.0, 2.0),
         ProgressBorder {
             progress: 1.0,
             index_state: border_index_state,
             geometry: border_geometry,
+            background_material,
+            played_material,
+            remaining_material,
         },
         TipOverlay,
     ));
@@ -184,26 +194,38 @@ pub(super) fn process_jobs(
     jobs: Res<JobConfig>,
     mut state: ResMut<JobSensoryState>,
 ) {
-    process_jobs_at(&jobs, &mut state, time.elapsed());
+    let changed = process_jobs_at(
+        &jobs,
+        state.bypass_change_detection(),
+        time.elapsed(),
+    );
+    if changed {
+        state.set_changed();
+    }
 }
 
-fn process_jobs_at(jobs: &JobConfig, state: &mut JobSensoryState, now: Duration) {
+fn process_jobs_at(jobs: &JobConfig, state: &mut JobSensoryState, now: Duration) -> bool {
     match state.focus_state.as_ref() {
         None => {
-            if !jobs.is_empty() {
+            if jobs.is_empty() {
+                false
+            } else {
                 state.restart(now);
+                true
             }
-
-            return;
         }
         Some(inner_s) => match jobs.0.tips.get(inner_s.current_index) {
             None => {
                 state.restart(now);
+                true
             }
             Some(tip) => {
                 if inner_s.elapsed_at(now) >= Duration::from_secs(tip.show_time()) {
                     let next_index = (inner_s.current_index + 1) % jobs.0.tips.len();
                     state.restart_at(next_index, now);
+                    true
+                } else {
+                    false
                 }
             }
         },
@@ -217,6 +239,7 @@ pub fn render_job(
     mut text: Single<&mut Text, With<TipText>>,
     progress_border: Single<(&mut ProgressBorder, &Mesh2d)>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     let Some(focus_state): Option<&FocusState> = state.focus_state.as_ref() else {
         return;
@@ -225,18 +248,68 @@ pub fn render_job(
         return;
     };
 
+    let (mut progress_border, border_mesh) = progress_border.into_inner();
     if state.is_changed() {
         text.0 = truncate_tip(&tip.tip);
+        let current_color = tip_color(&jobs, focus_state.current_index);
+        let next_index = (focus_state.current_index + 1) % jobs.0.tips.len();
+        let next_color = tip_color(&jobs, next_index);
+        set_material_color(
+            &mut materials,
+            &progress_border.background_material,
+            tip_background_color(current_color),
+        );
+        set_material_color(&mut materials, &progress_border.played_material, next_color);
+        set_material_color(
+            &mut materials,
+            &progress_border.remaining_material,
+            current_color,
+        );
     }
 
     let elapsed = focus_state.elapsed_at(time.elapsed()).as_secs_f32();
     let progress = (1.0 - elapsed / tip.show_time() as f32).clamp(0.0, 1.0);
-    let (mut progress_border, border_mesh) = progress_border.into_inner();
     if progress != progress_border.progress {
         progress_border.progress = progress;
         if let Some(mut mesh) = meshes.get_mut(&border_mesh.0) {
             update_progress_border_mesh(&mut mesh, &mut progress_border, progress);
         }
+    }
+}
+
+fn tip_color(jobs: &JobConfig, tip_index: usize) -> Color {
+    Color::Srgba(
+        Srgba::hex(jobs.resolved_color_at(tip_index))
+            .expect("tip colors are validated before startup"),
+    )
+}
+
+fn tip_background_color(color: Color) -> Color {
+    let color = color.to_srgba();
+    Color::srgba(
+        color.red * TIP_OVERLAY_BACKGROUND_BRIGHTNESS,
+        color.green * TIP_OVERLAY_BACKGROUND_BRIGHTNESS,
+        color.blue * TIP_OVERLAY_BACKGROUND_BRIGHTNESS,
+        TIP_OVERLAY_BACKGROUND_ALPHA,
+    )
+}
+
+fn border_material(color: Color) -> ColorMaterial {
+    ColorMaterial {
+        color,
+        // Keep every overlay mesh in the transparent phase so Z controls their order.
+        alpha_mode: AlphaMode2d::Blend,
+        ..default()
+    }
+}
+
+fn set_material_color(
+    materials: &mut Assets<ColorMaterial>,
+    handle: &Handle<ColorMaterial>,
+    color: Color,
+) {
+    if let Some(mut material) = materials.get_mut(handle) {
+        material.color = color;
     }
 }
 

@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use crate::job::{JobConfig, Tips};
+use crate::job::{JobConfig, Tips, is_valid_tip_color};
 use crate::sensory::SensoryPlugin;
 use crate::settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use bevy::{
@@ -88,8 +88,13 @@ fn validate_config(config: &Tips) -> Result<(), String> {
             && (show_time <= 0 || show_time > tip.interval)
         {
             return Err(format!(
-                "{name}.showTime 必须是大于 0 且不超过 interval 的有限秒数"
+                "{name}.showTime must greater than 0"
             ));
+        }
+        if let Some(color) = tip.color.as_deref()
+            && !is_valid_tip_color(color)
+        {
+            return Err(format!("{name}.color must use format like #RRGGBB"));
         }
     }
 
