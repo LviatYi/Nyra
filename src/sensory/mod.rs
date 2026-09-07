@@ -1,17 +1,14 @@
-pub mod tip_overlay;
 mod job;
+pub mod tip_overlay;
 
-use crate::sensory::tip_overlay::{drag_overlay, process_jobs, render_job, setup_overlay};
-use bevy::prelude::*;
 use crate::sensory::job::JobSensoryState;
+use bevy::prelude::*;
 
 pub struct SensoryPlugin;
 
 impl Plugin for SensoryPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<JobSensoryState>()
-            .add_systems(Startup, setup_overlay)
-           .add_systems(Update, (process_jobs, render_job).chain())
-           .add_systems(Update, drag_overlay);
+        app.init_resource::<JobSensoryState>();
+        tip_overlay::configure(app);
     }
 }

@@ -6,7 +6,6 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     process::ExitCode,
-    time::Duration,
 };
 
 use crate::job::{JobConfig, Tips, is_valid_tip_color};
@@ -19,7 +18,6 @@ use bevy::{
         settings::{Backends, WgpuSettings},
     },
     window::{CompositeAlphaMode, WindowLevel, WindowResolution},
-    winit::{UpdateMode, WinitSettings},
 };
 
 const MAX_TEXT_COLUMNS: usize = 15;
@@ -87,9 +85,7 @@ fn validate_config(config: &Tips) -> Result<(), String> {
         if let Some(show_time) = tip.show_time
             && (show_time <= 0 || show_time > tip.interval)
         {
-            return Err(format!(
-                "{name}.showTime must greater than 0"
-            ));
+            return Err(format!("{name}.showTime must greater than 0"));
         }
         if let Some(color) = tip.color.as_deref()
             && !is_valid_tip_color(color)
