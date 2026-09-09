@@ -17,9 +17,6 @@ pub(super) fn begin_tip_transition(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    if !state.is_changed() {
-        return;
-    }
     let Some(active_job) = state.active_job.as_ref() else {
         return;
     };

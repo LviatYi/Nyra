@@ -11,7 +11,7 @@ use self::{
     transition::begin_tip_transition,
     view::{drag_overlay, setup_overlay, sync_tip_colors, sync_tip_text},
 };
-use super::job_manager::process_jobs;
+use super::job_manager::{ActiveJobState, process_jobs};
 use bevy::prelude::*;
 
 pub(super) fn configure(app: &mut App) {
@@ -20,9 +20,9 @@ pub(super) fn configure(app: &mut App) {
             Update,
             (
                 process_jobs,
-                sync_tip_text,
-                sync_tip_colors,
-                begin_tip_transition,
+                (sync_tip_text, sync_tip_colors, begin_tip_transition)
+                    .chain()
+                    .run_if(resource_changed::<ActiveJobState>),
                 animate_ripple,
                 update_countdown_border,
             )

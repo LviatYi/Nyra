@@ -118,9 +118,6 @@ pub(super) fn sync_tip_text(
     state: Res<ActiveJobState>,
     mut text: Single<&mut Text, With<TipText>>,
 ) {
-    if !state.is_changed() {
-        return;
-    }
     let Some(active_job) = state.active_job.as_ref() else {
         return;
     };
@@ -137,9 +134,6 @@ pub(super) fn sync_tip_colors(
     countdown: Single<&MeshMaterial2d<ColorMaterial>, With<CountdownBorder>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    if !state.is_changed() {
-        return;
-    }
     let Some(active_job) = state.active_job.as_ref() else {
         return;
     };
