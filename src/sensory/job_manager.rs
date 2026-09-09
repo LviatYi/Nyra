@@ -121,8 +121,17 @@ impl JobManager {
             // Do not repeat the current job while another job is eligible.
             .filter(|(index, _)| Some(*index) != completed_index)
             .filter(|(index, _)| self.jobs[*index].is_eligible_at(now))
-            // Shortest interval wins; configuration order resolves equal intervals.
-            .min_by_key(|(index, job)| (job.interval, *index))
+            // Prefer the job that has been eligible for the longest time. A job
+            // that has never completed is treated as eligible since startup, so
+            // every initial job is selected before recurring jobs can starve it.
+            // Interval and configuration order provide deterministic tie-breaks.
+            .min_by_key(|(index, job)| {
+                (
+                    self.jobs[*index].eligible_at.unwrap_or(Duration::ZERO),
+                    job.interval,
+                    *index,
+                )
+            })
             .map(|(index, _)| index)
             // Continuous display is preferred to waiting when every alternative is blocked.
             .or(completed_index.filter(|index| *index < config.0.tips.len()))
@@ -151,14 +160,14 @@ mod tests {
     use crate::job::{Tip, Tips};
 
     #[test]
-    fn schedules_the_documented_interval_example() {
+    fn schedules_by_earliest_eligibility() {
         assert_schedule(
             &[(1, 3), (10, 3), (15, 3)],
             &[
                 (0, 0, 1),
-                (3, 1, 0),
-                (6, 0, 2),
-                (9, 2, 0),
+                (3, 1, 2),
+                (6, 2, 0),
+                (9, 0, 0),
                 (12, 0, 0),
                 (15, 0, 1),
                 (18, 1, 0),
