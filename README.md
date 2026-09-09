@@ -69,4 +69,5 @@ cargo run --locked -- "D:\Configs\nyra.json"
 
 ## 文档
 
+- [开发路线图](ROADMAP.md)：短期需求及 Sensory、Detection、Reaction 的阶段目标。
 - [一阶段实现总结](docs/phase1-summary.md)：功能、完整使用方法、调度示例、架构、验证记录与优化方向。
