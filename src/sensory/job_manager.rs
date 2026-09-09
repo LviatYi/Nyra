@@ -4,13 +4,22 @@ use std::time::Duration;
 
 pub(super) struct ActiveJob {
     pub(super) current_index: usize,
-    pub(super) next_index: usize,
+    pub(super) preview_next_index: usize,
     pub(super) started_at: Duration,
+    pub(super) ends_at: Duration,
 }
 
 impl ActiveJob {
     pub(super) fn elapsed_at(&self, now: Duration) -> Duration {
         now.saturating_sub(self.started_at)
+    }
+
+    pub(super) fn remaining_fraction_at(&self, now: Duration) -> f32 {
+        let duration = self.ends_at.saturating_sub(self.started_at).as_secs_f32();
+        if duration == 0.0 {
+            return 0.0;
+        }
+        (1.0 - self.elapsed_at(now).as_secs_f32() / duration).clamp(0.0, 1.0)
     }
 }
 
@@ -21,11 +30,18 @@ pub(super) struct ActiveJobState {
 }
 
 impl ActiveJobState {
-    fn start(&mut self, index: usize, next_index: usize, now: Duration) {
+    fn start(
+        &mut self,
+        index: usize,
+        preview_next_index: usize,
+        now: Duration,
+        duration: Duration,
+    ) {
         self.active_job = Some(ActiveJob {
             current_index: index,
-            next_index,
+            preview_next_index,
             started_at: now,
+            ends_at: now.saturating_add(duration),
         });
     }
 }
@@ -34,13 +50,18 @@ impl ActiveJobState {
 #[derive(Debug, Default)]
 struct JobRuntimeState {
     /// `None` means the job has never completed and is immediately eligible.
-    eligible_at: Option<Duration>,
+    finished_at: Option<Duration>,
 }
 
 impl JobRuntimeState {
-    fn is_eligible_at(&self, now: Duration) -> bool {
-        self.eligible_at
-            .is_none_or(|eligible_at| now >= eligible_at)
+    fn eligible_at(&self, interval: Duration) -> Duration {
+        self.finished_at
+            .map(|finished_at| finished_at.saturating_add(interval))
+            .unwrap_or(Duration::ZERO)
+    }
+
+    fn is_eligible_at(&self, now: Duration, interval: Duration) -> bool {
+        now >= self.eligible_at(interval)
     }
 }
 
@@ -66,27 +87,17 @@ impl JobManager {
             self.start_job(config, state, next_index, now);
             return true;
         };
-        let Some(current_job) = config.0.tips.get(active_job.current_index) else {
-            let next_index = self.select_next(config, now, None).unwrap();
-            self.start_job(config, state, next_index, now);
-            return true;
-        };
-        if active_job.elapsed_at(now) < Duration::from_secs(current_job.show_time()) {
+        if now < active_job.ends_at {
             return false;
         }
 
         let completed_index = active_job.current_index;
-        let scheduled_next_index = active_job.next_index;
         // interval starts after presentation completes; the job's own showTime does
         // not consume its next interval.
-        self.jobs[completed_index].eligible_at =
-            Some(now.saturating_add(Duration::from_secs(current_job.interval)));
-        let next_index = if scheduled_next_index < config.0.tips.len() {
-            scheduled_next_index
-        } else {
-            self.select_next(config, now, Some(completed_index))
-                .unwrap()
-        };
+        self.jobs[completed_index].finished_at = Some(now);
+        let next_index = self
+            .select_next(config, now, Some(completed_index))
+            .unwrap();
         self.start_job(config, state, next_index, now);
         true
     }
@@ -98,13 +109,13 @@ impl JobManager {
         index: usize,
         now: Duration,
     ) {
-        let presentation_ends_at =
-            now.saturating_add(Duration::from_secs(config.0.tips[index].show_time()));
-        let next_index = self
-            .select_next(config, presentation_ends_at, Some(index))
+        let duration = Duration::from_secs(config.0.tips[index].show_time());
+        let ends_at = now.saturating_add(duration);
+        let preview_next_index = self
+            .select_next(config, ends_at, Some(index))
             // A non-empty config always falls back to the selected job.
             .unwrap();
-        state.start(index, next_index, now);
+        state.start(index, preview_next_index, now, duration);
     }
 
     fn select_next(
@@ -120,14 +131,16 @@ impl JobManager {
             .enumerate()
             // Do not repeat the current job while another job is eligible.
             .filter(|(index, _)| Some(*index) != completed_index)
-            .filter(|(index, _)| self.jobs[*index].is_eligible_at(now))
+            .filter(|(index, job)| {
+                self.jobs[*index].is_eligible_at(now, Duration::from_secs(job.interval))
+            })
             // Prefer the job that has been eligible for the longest time. A job
             // that has never completed is treated as eligible since startup, so
             // every initial job is selected before recurring jobs can starve it.
             // Interval and configuration order provide deterministic tie-breaks.
             .min_by_key(|(index, job)| {
                 (
-                    self.jobs[*index].eligible_at.unwrap_or(Duration::ZERO),
+                    self.jobs[*index].eligible_at(Duration::from_secs(job.interval)),
                     job.interval,
                     *index,
                 )
@@ -190,11 +203,11 @@ mod tests {
 
     fn assert_schedule(job_times: &[(u64, u64)], expected: &[(u64, usize, usize)]) {
         let mut scheduler = TestScheduler::new(job_times);
-        for &(time, current_index, next_index) in expected {
+        for &(time, current_index, preview_next_index) in expected {
             assert!(scheduler.update_at(time));
             assert_eq!(
                 scheduler.active_indexes(),
-                (current_index, next_index),
+                (current_index, preview_next_index),
                 "unexpected schedule at {time}s"
             );
         }
@@ -232,7 +245,7 @@ mod tests {
 
         fn active_indexes(&self) -> (usize, usize) {
             let active_job = self.state.active_job.as_ref().unwrap();
-            (active_job.current_index, active_job.next_index)
+            (active_job.current_index, active_job.preview_next_index)
         }
     }
 }

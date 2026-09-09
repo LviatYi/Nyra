@@ -144,13 +144,16 @@ pub(super) fn sync_tip_colors(
         return;
     };
 
-    let current_color = tip_color(&jobs, active_job.current_index);
     set_material_color(
         &mut materials,
         &played.0,
-        tip_color(&jobs, active_job.next_index),
+        tip_color(&jobs, active_job.preview_next_index),
     );
-    set_material_color(&mut materials, &countdown.0, current_color);
+    set_material_color(
+        &mut materials,
+        &countdown.0,
+        tip_color(&jobs, active_job.current_index),
+    );
 }
 
 pub(super) fn drag_overlay(
