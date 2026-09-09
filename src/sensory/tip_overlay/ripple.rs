@@ -106,53 +106,55 @@ pub(super) fn animate_ripple(
 ) {
     let now = time.elapsed();
     let (mut ripple, ripple_mesh, ripple_material) = ripple.into_inner();
-    let mut phase = ripple.phase;
-    if let RipplePhase::Expanding {
-        started_at,
-        target_tip_index,
-        color,
-    } = phase
-    {
-        let linear_progress = (now.saturating_sub(started_at).as_secs_f32()
-            / TIP_OVERLAY_RIPPLE_EXPAND_DURATION.as_secs_f32())
-        .clamp(0.0, 1.0);
-        let eased_progress = 1.0 - (1.0 - linear_progress).powi(3);
-        if let Some(mut mesh) = meshes.get_mut(&ripple_mesh.0) {
-            update_ripple_mesh(&mut mesh, &ripple, ripple.cover_radius * eased_progress);
-        }
-
-        if linear_progress == 1.0 {
-            set_material_color(&mut materials, &background.0, tip_background_color(color));
-            phase = RipplePhase::Fading {
-                started_at: started_at + TIP_OVERLAY_RIPPLE_EXPAND_DURATION,
+    loop {
+        match ripple.phase {
+            RipplePhase::Idle => return,
+            RipplePhase::Expanding {
+                started_at,
                 target_tip_index,
                 color,
-            };
+            } => {
+                let linear_progress = (now.saturating_sub(started_at).as_secs_f32()
+                    / TIP_OVERLAY_RIPPLE_EXPAND_DURATION.as_secs_f32())
+                .clamp(0.0, 1.0);
+                let eased_progress = 1.0 - (1.0 - linear_progress).powi(3);
+                if let Some(mut mesh) = meshes.get_mut(&ripple_mesh.0) {
+                    update_ripple_mesh(&mut mesh, &ripple, ripple.cover_radius * eased_progress);
+                }
+                if linear_progress < 1.0 {
+                    return;
+                }
+
+                set_material_color(&mut materials, &background.0, tip_background_color(color));
+                ripple.phase = RipplePhase::Fading {
+                    started_at: started_at + TIP_OVERLAY_RIPPLE_EXPAND_DURATION,
+                    target_tip_index,
+                    color,
+                };
+                // Evaluate fading in this frame too, preserving elapsed time after a delay.
+            }
+            RipplePhase::Fading {
+                started_at,
+                target_tip_index,
+                color,
+            } => {
+                let fade_progress = (now.saturating_sub(started_at).as_secs_f32()
+                    / TIP_OVERLAY_RIPPLE_FADE_DURATION.as_secs_f32())
+                .clamp(0.0, 1.0);
+                let alpha = (1.0 - fade_progress).powi(2);
+                set_material_color(
+                    &mut materials,
+                    &ripple_material.0,
+                    color_with_alpha(color, alpha),
+                );
+                if fade_progress == 1.0 {
+                    ripple.displayed_tip_index = target_tip_index;
+                    ripple.phase = RipplePhase::Idle;
+                }
+                return;
+            }
         }
     }
-
-    if let RipplePhase::Fading {
-        started_at,
-        target_tip_index,
-        color,
-    } = phase
-    {
-        let fade_progress = (now.saturating_sub(started_at).as_secs_f32()
-            / TIP_OVERLAY_RIPPLE_FADE_DURATION.as_secs_f32())
-        .clamp(0.0, 1.0);
-        let alpha = (1.0 - fade_progress).powi(2);
-        set_material_color(
-            &mut materials,
-            &ripple_material.0,
-            color_with_alpha(color, alpha),
-        );
-        if fade_progress == 1.0 {
-            ripple.displayed_tip_index = target_tip_index;
-            phase = RipplePhase::Idle;
-        }
-    }
-
-    ripple.phase = phase;
 }
 
 fn update_ripple_mesh(mesh: &mut Mesh, ripple: &Ripple, radius: f32) {
