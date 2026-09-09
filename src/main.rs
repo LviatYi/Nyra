@@ -80,10 +80,10 @@ fn validate_config(config: &Tips) -> Result<(), String> {
             return Err(format!("{name}.tip 不能为空"));
         }
         if tip.interval <= 0 {
-            return Err(format!("{name}.interval 必须是大于 0 的有限秒数"));
+            return Err(format!("{name}.interval must greater than 0"));
         }
         if let Some(show_time) = tip.show_time
-            && (show_time <= 0 || show_time > tip.interval)
+            && show_time <= 0
         {
             return Err(format!("{name}.showTime must greater than 0"));
         }

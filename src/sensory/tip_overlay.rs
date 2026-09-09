@@ -11,7 +11,7 @@ use self::{
     transition::begin_tip_transition,
     view::{drag_overlay, setup_overlay, sync_tip_colors, sync_tip_text},
 };
-use super::job::process_jobs;
+use super::job_manager::process_jobs;
 use bevy::prelude::*;
 
 pub(super) fn configure(app: &mut App) {

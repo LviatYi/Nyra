@@ -1,7 +1,7 @@
 use super::geometry::{OutlinePoint, rounded_rectangle_outline, triangle_mesh};
 use crate::{
     job::JobConfig,
-    sensory::job::JobSensoryState,
+    sensory::job_manager::ActiveJobState,
     settings_default_values::{
         TIP_OVERLAY_BORDER_WIDTH, TIP_OVERLAY_CORNER_RADIUS, WINDOW_HEIGHT, WINDOW_WIDTH,
     },
@@ -268,19 +268,19 @@ pub(super) fn progress_border_mesh(path: &ProgressBorderPath) -> Mesh {
 pub(super) fn update_countdown_border(
     time: Res<Time<Real>>,
     jobs: Res<JobConfig>,
-    state: Res<JobSensoryState>,
+    state: Res<ActiveJobState>,
     border: Single<(&mut CountdownBorder, &Mesh2d)>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    let Some(focus_state) = state.focus_state.as_ref() else {
+    let Some(active_job) = state.active_job.as_ref() else {
         return;
     };
-    let Some(tip) = jobs.0.tips.get(focus_state.current_index) else {
+    let Some(tip) = jobs.0.tips.get(active_job.current_index) else {
         return;
     };
 
     let (mut border, border_mesh) = border.into_inner();
-    let elapsed = focus_state.elapsed_at(time.elapsed()).as_secs_f32();
+    let elapsed = active_job.elapsed_at(time.elapsed()).as_secs_f32();
     let progress = (1.0 - elapsed / tip.show_time() as f32).clamp(0.0, 1.0);
     if progress == border.progress {
         return;

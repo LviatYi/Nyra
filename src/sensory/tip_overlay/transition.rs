@@ -3,14 +3,14 @@ use super::{
     ripple::Ripple,
     style::{set_material_color, tip_color},
 };
-use crate::{job::JobConfig, sensory::job::JobSensoryState};
+use crate::{job::JobConfig, sensory::job_manager::ActiveJobState};
 use bevy::prelude::*;
 use rand::RngExt;
 
 /// Starts all visual state tied to a newly selected tip.
 pub(super) fn begin_tip_transition(
     jobs: Res<JobConfig>,
-    state: Res<JobSensoryState>,
+    state: Res<ActiveJobState>,
     geometry: Res<ProgressBorderGeometry>,
     border: Single<(&mut CountdownBorder, &Mesh2d)>,
     ripple: Single<(&mut Ripple, &MeshMaterial2d<ColorMaterial>)>,
@@ -20,16 +20,16 @@ pub(super) fn begin_tip_transition(
     if !state.is_changed() {
         return;
     }
-    let Some(focus_state) = state.focus_state.as_ref() else {
+    let Some(active_job) = state.active_job.as_ref() else {
         return;
     };
 
     let (mut ripple, ripple_material) = ripple.into_inner();
-    if focus_state.current_index == ripple.displayed_tip_index() {
+    if active_job.current_index == ripple.displayed_tip_index() {
         return;
     }
 
-    let current_color = tip_color(&jobs, focus_state.current_index);
+    let current_color = tip_color(&jobs, active_job.current_index);
     let (mut border, border_mesh) = border.into_inner();
     let Some(mut border_mesh) = meshes.get_mut(&border_mesh.0) else {
         return;
@@ -39,8 +39,8 @@ pub(super) fn begin_tip_transition(
     let start_progress = border.restart_at(&geometry, requested_start, &mut border_mesh);
     let origin = geometry.center_at(start_progress);
     ripple.begin(
-        focus_state.started_at,
-        focus_state.current_index,
+        active_job.started_at,
+        active_job.current_index,
         current_color,
         origin,
     );

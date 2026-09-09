@@ -9,7 +9,7 @@ use super::{
 use crate::{
     MAX_TEXT_COLUMNS,
     job::JobConfig,
-    sensory::job::JobSensoryState,
+    sensory::job_manager::ActiveJobState,
     settings_default_values::{TIP_OVERLAY_CORNER_RADIUS, WINDOW_HEIGHT, WINDOW_WIDTH},
 };
 use bevy::{prelude::*, window::PrimaryWindow};
@@ -115,16 +115,16 @@ pub(super) fn setup_overlay(
 
 pub(super) fn sync_tip_text(
     jobs: Res<JobConfig>,
-    state: Res<JobSensoryState>,
+    state: Res<ActiveJobState>,
     mut text: Single<&mut Text, With<TipText>>,
 ) {
     if !state.is_changed() {
         return;
     }
-    let Some(focus_state) = state.focus_state.as_ref() else {
+    let Some(active_job) = state.active_job.as_ref() else {
         return;
     };
-    let Some(tip) = jobs.0.tips.get(focus_state.current_index) else {
+    let Some(tip) = jobs.0.tips.get(active_job.current_index) else {
         return;
     };
     text.0 = truncate_tip(&tip.tip);
@@ -132,7 +132,7 @@ pub(super) fn sync_tip_text(
 
 pub(super) fn sync_tip_colors(
     jobs: Res<JobConfig>,
-    state: Res<JobSensoryState>,
+    state: Res<ActiveJobState>,
     played: Single<&MeshMaterial2d<ColorMaterial>, With<PlayedBorder>>,
     countdown: Single<&MeshMaterial2d<ColorMaterial>, With<CountdownBorder>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
@@ -140,13 +140,16 @@ pub(super) fn sync_tip_colors(
     if !state.is_changed() {
         return;
     }
-    let Some(focus_state) = state.focus_state.as_ref() else {
+    let Some(active_job) = state.active_job.as_ref() else {
         return;
     };
 
-    let current_color = tip_color(&jobs, focus_state.current_index);
-    let next_index = (focus_state.current_index + 1) % jobs.0.tips.len();
-    set_material_color(&mut materials, &played.0, tip_color(&jobs, next_index));
+    let current_color = tip_color(&jobs, active_job.current_index);
+    set_material_color(
+        &mut materials,
+        &played.0,
+        tip_color(&jobs, active_job.next_index),
+    );
     set_material_color(&mut materials, &countdown.0, current_color);
 }
 
