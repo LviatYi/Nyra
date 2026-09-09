@@ -29,21 +29,10 @@ pub(super) struct ActiveJobState {
     pub(super) active_job: Option<ActiveJob>,
 }
 
-impl ActiveJobState {
-    fn start(
-        &mut self,
-        index: usize,
-        preview_next_index: usize,
-        now: Duration,
-        duration: Duration,
-    ) {
-        self.active_job = Some(ActiveJob {
-            current_index: index,
-            preview_next_index,
-            started_at: now,
-            ends_at: now.saturating_add(duration),
-        });
-    }
+/// A replacement is committed only when the scheduling result changes.
+enum JobUpdate {
+    Unchanged,
+    Replace(Option<ActiveJob>),
 }
 
 /// Runtime scheduling state for one configured job.
@@ -76,19 +65,27 @@ pub(super) struct JobManager {
 }
 
 impl JobManager {
-    fn update_at(&mut self, config: &JobConfig, state: &mut ActiveJobState, now: Duration) -> bool {
+    fn eval_update_at(
+        &mut self,
+        config: &JobConfig,
+        state: &ActiveJobState,
+        now: Duration,
+    ) -> JobUpdate {
         self.synchronize_job_count(config.0.tips.len());
         if config.is_empty() {
-            return state.active_job.take().is_some();
+            return if state.active_job.is_some() {
+                JobUpdate::Replace(None)
+            } else {
+                JobUpdate::Unchanged
+            };
         }
 
         let Some(active_job) = state.active_job.as_ref() else {
             let next_index = self.select_next(config, now, None).unwrap();
-            self.start_job(config, state, next_index, now);
-            return true;
+            return JobUpdate::Replace(Some(self.create_job(config, next_index, now)));
         };
         if now < active_job.ends_at {
-            return false;
+            return JobUpdate::Unchanged;
         }
 
         let completed_index = active_job.current_index;
@@ -98,24 +95,22 @@ impl JobManager {
         let next_index = self
             .select_next(config, now, Some(completed_index))
             .unwrap();
-        self.start_job(config, state, next_index, now);
-        true
+        JobUpdate::Replace(Some(self.create_job(config, next_index, now)))
     }
 
-    fn start_job(
-        &self,
-        config: &JobConfig,
-        state: &mut ActiveJobState,
-        index: usize,
-        now: Duration,
-    ) {
+    fn create_job(&self, config: &JobConfig, index: usize, now: Duration) -> ActiveJob {
         let duration = Duration::from_secs(config.0.tips[index].show_time());
         let ends_at = now.saturating_add(duration);
         let preview_next_index = self
             .select_next(config, ends_at, Some(index))
             // A non-empty config always falls back to the selected job.
             .unwrap();
-        state.start(index, preview_next_index, now, duration);
+        ActiveJob {
+            current_index: index,
+            preview_next_index,
+            started_at: now,
+            ends_at,
+        }
     }
 
     fn select_next(
@@ -161,9 +156,9 @@ pub(super) fn process_jobs(
     mut manager: ResMut<JobManager>,
     mut state: ResMut<ActiveJobState>,
 ) {
-    let changed = manager.update_at(&config, state.bypass_change_detection(), time.elapsed());
-    if changed {
-        state.set_changed();
+    let update = manager.eval_update_at(&config, &state, time.elapsed());
+    if let JobUpdate::Replace(next) = update {
+        state.active_job = next;
     }
 }
 
@@ -199,6 +194,46 @@ mod tests {
     #[test]
     fn configuration_order_breaks_equal_interval_ties() {
         assert_schedule(&[(5, 1), (5, 1), (5, 1)], &[(0, 0, 1), (1, 1, 2)]);
+    }
+
+    #[test]
+    fn marks_state_changed_only_when_committing_a_scheduling_update() {
+        #[derive(Resource, Default)]
+        struct ObservedChanges(Vec<bool>);
+
+        fn observe(state: Res<ActiveJobState>, mut changes: ResMut<ObservedChanges>) {
+            changes.0.push(state.is_changed());
+        }
+
+        // Exercise both repeating the current tip and switching to another tip.
+        for job_times in [vec![(1, 3)], vec![(1, 3), (2, 3)]] {
+            let scheduler = TestScheduler::new(&job_times);
+            let mut world = World::new();
+            world.insert_resource(scheduler.config);
+            world.insert_resource(scheduler.manager);
+            world.insert_resource(scheduler.state);
+            world.init_resource::<Time<Real>>();
+            world.init_resource::<ObservedChanges>();
+            let mut schedule = Schedule::default();
+            schedule.add_systems((process_jobs, observe).chain());
+
+            for elapsed in [0, 1, 2, 1] {
+                world
+                    .resource_mut::<Time<Real>>()
+                    .advance_by(Duration::from_secs(elapsed));
+                schedule.run(&mut world);
+            }
+
+            world.resource_mut::<JobConfig>().0.tips.clear();
+            schedule.run(&mut world);
+            schedule.run(&mut world);
+
+            assert_eq!(
+                world.resource::<ObservedChanges>().0,
+                [true, false, true, false, true, false],
+            );
+            assert!(world.resource::<ActiveJobState>().active_job.is_none());
+        }
     }
 
     fn assert_schedule(job_times: &[(u64, u64)], expected: &[(u64, usize, usize)]) {
@@ -239,8 +274,16 @@ mod tests {
         }
 
         fn update_at(&mut self, seconds: u64) -> bool {
-            self.manager
-                .update_at(&self.config, &mut self.state, Duration::from_secs(seconds))
+            match self
+                .manager
+                .eval_update_at(&self.config, &self.state, Duration::from_secs(seconds))
+            {
+                JobUpdate::Unchanged => false,
+                JobUpdate::Replace(next) => {
+                    self.state.active_job = next;
+                    true
+                }
+            }
         }
 
         fn active_indexes(&self) -> (usize, usize) {
