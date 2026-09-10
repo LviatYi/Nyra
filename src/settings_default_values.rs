@@ -22,4 +22,11 @@ pub const TIP_OVERLAY_BACKGROUND_ALPHA: f32 = 0.60;
 pub const TIP_OVERLAY_RIPPLE_SEGMENTS: usize = 96;
 pub const TIP_OVERLAY_RIPPLE_EXPAND_DURATION: Duration = Duration::from_millis(360);
 pub const TIP_OVERLAY_RIPPLE_FADE_DURATION: Duration = Duration::from_millis(240);
+pub const TIP_TEXT_SCROLL_START_WAIT_DURATION: Duration = Duration::from_millis(1500);
+pub const TIP_TEXT_SCROLL_END_WAIT_DURATION: Duration = Duration::from_millis(1000);
+pub const TIP_TEXT_SCROLL_SPEED: f32 = 120.0;
+pub const TIP_TEXT_SCROLL_ACCELERATION: f32 = 240.0;
+pub const TIP_TEXT_SCROLL_RETURN_SPEED: f32 = 8000.0;
+/// Braking magnitude in logical pixels per second squared; return has no acceleration phase.
+pub const TIP_TEXT_SCROLL_RETURN_DECELERATION: f32 = 24000.0;
 //endregion

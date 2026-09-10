@@ -20,8 +20,6 @@ use bevy::{
     window::{CompositeAlphaMode, WindowLevel, WindowResolution},
 };
 
-const MAX_TEXT_COLUMNS: usize = 15;
-
 fn main() -> ExitCode {
     configure_render_environment();
 

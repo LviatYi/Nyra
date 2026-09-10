@@ -2,18 +2,17 @@ use super::{
     geometry::rounded_rectangle_mesh,
     progress_border::{CountdownBorder, ProgressBorderGeometry, progress_border_mesh},
     ripple::{Ripple, ripple_mesh},
+    text_scroll::{TextScroll, TipTextViewport},
     style::{
         color_with_alpha, overlay_material, set_material_color, tip_background_color, tip_color,
     },
 };
 use crate::{
-    MAX_TEXT_COLUMNS,
     job::JobConfig,
     sensory::job_manager::ActiveJobState,
     settings_default_values::{TIP_OVERLAY_CORNER_RADIUS, WINDOW_HEIGHT, WINDOW_WIDTH},
 };
 use bevy::{prelude::*, window::PrimaryWindow};
-use unicode_width::UnicodeWidthChar;
 
 const COLOR_MAIN_TIP_TEXT: Color = Color::srgb(0.94, 0.96, 1.0);
 
@@ -94,22 +93,36 @@ pub(super) fn setup_overlay(
             TipOverlay,
         ))
         .with_children(|parent| {
-            parent.spawn((
-                Text::new(truncate_tip(&tips.0.tips[0].tip)),
-                TextFont {
-                    font: FontSource::SystemUi,
-                    font_size: FontSize::Px(17.0),
-                    ..default()
-                },
-                TextColor(COLOR_MAIN_TIP_TEXT),
-                TextLayout::no_wrap(),
-                Node {
-                    max_width: px(136),
-                    overflow: Overflow::clip_x(),
-                    ..default()
-                },
-                TipText,
-            ));
+            parent
+                .spawn((
+                    Node {
+                        width: px(136),
+                        height: percent(100),
+                        align_items: AlignItems::Center,
+                        overflow: Overflow::clip(),
+                        ..default()
+                    },
+                    TipTextViewport,
+                ))
+                .with_children(|viewport| {
+                    viewport.spawn((
+                        Text::new(tips.0.tips[0].tip.replace(['\r', '\n'], " ")),
+                        TextFont {
+                            font: FontSource::SystemUi,
+                            font_size: FontSize::Px(17.0),
+                            ..default()
+                        },
+                        TextColor(COLOR_MAIN_TIP_TEXT),
+                        TextLayout::no_wrap(),
+                        Node {
+                            flex_shrink: 0.0,
+                            margin: UiRect::horizontal(Val::Auto),
+                            ..default()
+                        },
+                        TextScroll::default(),
+                        TipText,
+                    ));
+                });
         });
 }
 
@@ -124,7 +137,10 @@ pub(super) fn sync_tip_text(
     let Some(tip) = jobs.0.tips.get(active_job.current_index) else {
         return;
     };
-    text.0 = truncate_tip(&tip.tip);
+    let content = tip.tip.replace(['\r', '\n'], " ");
+    if text.0 != content {
+        text.0 = content;
+    }
 }
 
 pub(super) fn sync_tip_colors(
@@ -159,31 +175,3 @@ pub(super) fn drag_overlay(
     }
 }
 
-fn truncate_tip(value: &str) -> String {
-    // TODO_LviatYi: temporary solution
-    // wait for animation to be implemented
-    if display_width(value) <= MAX_TEXT_COLUMNS {
-        return value.to_owned();
-    }
-
-    let target = MAX_TEXT_COLUMNS.saturating_sub(3);
-    let mut width = 0;
-    let mut output = String::new();
-    for character in value.chars() {
-        let character_width = character.width().unwrap_or(0);
-        if width + character_width > target {
-            break;
-        }
-        width += character_width;
-        output.push(character);
-    }
-    output.push_str("...");
-    output
-}
-
-fn display_width(value: &str) -> usize {
-    value
-        .chars()
-        .map(|character| character.width().unwrap_or(0))
-        .sum()
-}

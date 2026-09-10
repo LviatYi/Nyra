@@ -1,18 +1,19 @@
 {
   "tips": [
     {
-      "tip": "TIP 1",
+      "tip": "S-T TIP 1",
       "interval": 8,
       "showTime": 8
     },
     {
-      "tip": "TIP 2",
+      "tip": "SHOW 6 TIP 2",
       "interval": 6,
       "showTime": 6
     },
     {
-      "tip": "TIP 3",
-      "interval": 8
+      "tip": "LONG LONG LONG LONG LONG LONG TEXT TIP 3",
+      "interval": 80,
+      "showTime": 60
     }
   ]
 }
