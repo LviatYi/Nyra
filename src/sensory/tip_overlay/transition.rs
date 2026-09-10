@@ -5,7 +5,6 @@ use super::{
 };
 use crate::{job::JobConfig, sensory::job_manager::ActiveJobState};
 use bevy::prelude::*;
-use rand::RngExt;
 
 /// Starts all visual state tied to a newly selected tip.
 pub(super) fn begin_tip_transition(
@@ -32,8 +31,8 @@ pub(super) fn begin_tip_transition(
         return;
     };
 
-    let requested_start = rand::rng().random_range(0.0..1.0);
-    let start_progress = border.restart_at(&geometry, requested_start, &mut border_mesh);
+    let start_progress =
+        border.restart_at(&geometry, active_job.anim_ripple_rng_at, &mut border_mesh);
     let origin = geometry.center_at(start_progress);
     ripple.begin(
         active_job.started_at,

@@ -1,10 +1,12 @@
 use crate::job::JobConfig;
 use bevy::prelude::*;
+use rand::RngExt;
 use std::time::Duration;
 
 pub(super) struct ActiveJob {
     pub(super) current_index: usize,
     pub(super) preview_next_index: usize,
+    pub(super) anim_ripple_rng_at: f32,
     pub(super) started_at: Duration,
     pub(super) ends_at: Duration,
 }
@@ -82,7 +84,7 @@ impl JobManager {
 
         let Some(active_job) = state.active_job.as_ref() else {
             let next_index = self.select_next(config, now, None).unwrap();
-            return JobUpdate::Replace(Some(self.create_job(config, next_index, now)));
+            return JobUpdate::Replace(Some(self.create_job(config, next_index, now, None)));
         };
         if now < active_job.ends_at {
             return JobUpdate::Unchanged;
@@ -95,19 +97,37 @@ impl JobManager {
         let next_index = self
             .select_next(config, now, Some(completed_index))
             .unwrap();
-        JobUpdate::Replace(Some(self.create_job(config, next_index, now)))
+        JobUpdate::Replace(Some(self.create_job(
+            config,
+            next_index,
+            now,
+            Some(active_job.anim_ripple_rng_at),
+        )))
     }
 
-    fn create_job(&self, config: &JobConfig, index: usize, now: Duration) -> ActiveJob {
+    fn create_job(
+        &self,
+        config: &JobConfig,
+        index: usize,
+        now: Duration,
+        last_anim_ripple_rng_at: Option<f32>,
+    ) -> ActiveJob {
         let duration = Duration::from_secs(config.0.tips[index].show_time());
         let ends_at = now.saturating_add(duration);
         let preview_next_index = self
             .select_next(config, ends_at, Some(index))
             // A non-empty config always falls back to the selected job.
             .unwrap();
+        let mut rng = rand::rng();
+        let requested_start = match last_anim_ripple_rng_at {
+            // Keep both directions around the closed border at least a quarter lap apart.
+            Some(previous) => (previous + rng.random_range(0.25..0.75)).rem_euclid(1.0),
+            None => rng.random_range(0.0..1.0),
+        };
         ActiveJob {
             current_index: index,
             preview_next_index,
+            anim_ripple_rng_at: requested_start,
             started_at: now,
             ends_at,
         }
@@ -274,10 +294,11 @@ mod tests {
         }
 
         fn update_at(&mut self, seconds: u64) -> bool {
-            match self
-                .manager
-                .eval_update_at(&self.config, &self.state, Duration::from_secs(seconds))
-            {
+            match self.manager.eval_update_at(
+                &self.config,
+                &self.state,
+                Duration::from_secs(seconds),
+            ) {
                 JobUpdate::Unchanged => false,
                 JobUpdate::Replace(next) => {
                     self.state.active_job = next;
