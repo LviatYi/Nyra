@@ -1,8 +1,12 @@
-use super::geometry::{OutlinePoint, rounded_rectangle_outline, triangle_mesh};
+use super::{
+    geometry::{OutlinePoint, rounded_rectangle_outline, triangle_mesh},
+    style::set_material_color,
+};
 use crate::{
     sensory::job_manager::ActiveJobState,
     settings_default_values::{
-        TIP_OVERLAY_BORDER_WIDTH, TIP_OVERLAY_CORNER_RADIUS, WINDOW_HEIGHT, WINDOW_WIDTH,
+        TIP_OVERLAY_BORDER_WIDTH, TIP_OVERLAY_CORNER_RADIUS, TIP_OVERLAY_COUNTDOWN_DARKENING,
+        WINDOW_HEIGHT, WINDOW_WIDTH,
     },
 };
 use bevy::{
@@ -17,6 +21,9 @@ pub(super) struct CountdownBorder {
     path: ProgressBorderPath,
     topology: VisibleBorderTopology,
 }
+
+#[derive(Component)]
+pub(super) struct CountdownBorderShade;
 
 #[derive(Resource)]
 pub(super) struct ProgressBorderGeometry {
@@ -268,7 +275,9 @@ pub(super) fn update_countdown_border(
     time: Res<Time<Real>>,
     state: Res<ActiveJobState>,
     border: Single<(&mut CountdownBorder, &Mesh2d)>,
+    shade: Single<&MeshMaterial2d<ColorMaterial>, With<CountdownBorderShade>>,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     let Some(active_job) = state.active_job.as_ref() else {
         return;
@@ -280,6 +289,13 @@ pub(super) fn update_countdown_border(
     }
 
     border.progress = progress;
+    let darkening =
+        EaseFunction::CubicOut.sample_clamped(1.0 - progress) * TIP_OVERLAY_COUNTDOWN_DARKENING;
+    set_material_color(
+        &mut materials,
+        &shade.0,
+        Color::srgba(0.0, 0.0, 0.0, darkening),
+    );
     let Some(mut mesh) = meshes.get_mut(&border_mesh.0) else {
         return;
     };

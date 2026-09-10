@@ -12,8 +12,8 @@
     },
     {
       "tip": "LONG LONG LONG LONG LONG LONG TEXT TIP 3",
-      "interval": 80,
-      "showTime": 60
+      "interval": 20,
+      "showTime": 10
     }
   ]
 }

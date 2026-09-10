@@ -15,6 +15,7 @@ pub const DEFAULT_TIP_COLORS: &[&str] = &[
 ];
 
 pub const TIP_OVERLAY_BORDER_WIDTH: f32 = 5.0;
+pub const TIP_OVERLAY_COUNTDOWN_DARKENING: f32 = 0.80;
 pub const TIP_OVERLAY_CORNER_RADIUS: f32 = 12.0;
 pub const TIP_OVERLAY_CORNER_SEGMENTS: usize = 12;
 pub const TIP_OVERLAY_BACKGROUND_BRIGHTNESS: f32 = 0.18;
@@ -27,6 +28,5 @@ pub const TIP_TEXT_SCROLL_END_WAIT_DURATION: Duration = Duration::from_millis(10
 pub const TIP_TEXT_SCROLL_SPEED: f32 = 120.0;
 pub const TIP_TEXT_SCROLL_ACCELERATION: f32 = 240.0;
 pub const TIP_TEXT_SCROLL_RETURN_SPEED: f32 = 8000.0;
-/// Braking magnitude in logical pixels per second squared; return has no acceleration phase.
 pub const TIP_TEXT_SCROLL_RETURN_DECELERATION: f32 = 24000.0;
 //endregion

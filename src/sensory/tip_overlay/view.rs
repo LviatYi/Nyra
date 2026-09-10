@@ -1,11 +1,13 @@
 use super::{
     geometry::rounded_rectangle_mesh,
-    progress_border::{CountdownBorder, ProgressBorderGeometry, progress_border_mesh},
+    progress_border::{
+        CountdownBorder, CountdownBorderShade, ProgressBorderGeometry, progress_border_mesh,
+    },
     ripple::{Ripple, ripple_mesh},
-    text_scroll::{TextScroll, TipTextViewport},
     style::{
         color_with_alpha, overlay_material, set_material_color, tip_background_color, tip_color,
     },
+    text_scroll::{TextScroll, TipTextViewport},
 };
 use crate::{
     job::JobConfig,
@@ -73,10 +75,18 @@ pub(super) fn setup_overlay(
         TipOverlay,
     ));
     commands.spawn((
-        Mesh2d(countdown_mesh),
+        Mesh2d(countdown_mesh.clone()),
         MeshMaterial2d(materials.add(overlay_material(current_color))),
         Transform::from_xyz(0.0, 0.0, 2.0),
         CountdownBorder::new(border_path),
+        TipOverlay,
+    ));
+    commands.spawn((
+        // Sharing the mesh keeps the shade aligned with the shrinking countdown.
+        Mesh2d(countdown_mesh),
+        MeshMaterial2d(materials.add(overlay_material(Color::srgba(0.0, 0.0, 0.0, 0.0)))),
+        Transform::from_xyz(0.0, 0.0, 2.1),
+        CountdownBorderShade,
         TipOverlay,
     ));
     commands.insert_resource(border_geometry);
@@ -174,4 +184,3 @@ pub(super) fn drag_overlay(
         window.start_drag_move();
     }
 }
-
