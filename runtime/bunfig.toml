@@ -1,0 +1,3 @@
+# Nyra supplies its own runtime configuration; macros need no packages.
+[install]
+auto = "disable"
