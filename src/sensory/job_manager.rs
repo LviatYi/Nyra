@@ -27,8 +27,14 @@ impl ActiveJob {
 
 /// Read-only scheduling result consumed by presentation systems.
 #[derive(Resource, Default)]
-pub(super) struct ActiveJobState {
+pub(crate) struct ActiveJobState {
     pub(super) active_job: Option<ActiveJob>,
+}
+
+impl ActiveJobState {
+    pub(crate) fn current_index(&self) -> Option<usize> {
+        self.active_job.as_ref().map(|job| job.current_index)
+    }
 }
 
 /// A replacement is committed only when the scheduling result changes.
@@ -284,6 +290,7 @@ mod tests {
                     interval,
                     show_time: Some(show_time),
                     color: None,
+                    reaction: None,
                 })
                 .collect();
             Self {

@@ -1,4 +1,5 @@
 mod job;
+mod reaction;
 mod sensory;
 mod settings_default_values;
 
@@ -9,6 +10,9 @@ use std::{
 };
 
 use crate::job::{JobConfig, Tips, is_valid_tip_color};
+use crate::reaction::{
+    GlobalHotkeys, ReactionConfig, ReactionPlugin, ReactionRunner, RunState,
+};
 use crate::sensory::SensoryPlugin;
 use crate::settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use bevy::{
@@ -20,24 +24,71 @@ use bevy::{
     window::{CompositeAlphaMode, WindowLevel, WindowResolution},
 };
 
+#[derive(serde::Deserialize)]
+struct AppConfig {
+    #[serde(flatten)]
+    tips: Tips,
+    #[serde(default)]
+    reaction: ReactionConfig,
+}
+
 fn main() -> ExitCode {
-    configure_render_environment();
-
-    let config_path = env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("config.json"));
-
-    match load_config(&config_path) {
-        Ok(config) => {
-            run(config);
-            ExitCode::SUCCESS
-        }
+    if env::args_os().skip(1).any(|arg| arg == "--help" || arg == "-h") {
+        println!("Usage: nyra.exe [config.json] [--run-script script.ts]\nScript paths are resolved relative to the configuration file directory; --run-script only executes the script without launching the floating window.");
+        return ExitCode::SUCCESS;
+    }
+    match launch() {
+        Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("Nyra 启动失败：{error}");
+            eprintln!("Nyra failed: {error}");
             ExitCode::FAILURE
         }
     }
+}
+
+fn launch() -> Result<(), String> {
+    let mut args = env::args_os().skip(1);
+    let mut config_path = None;
+    let mut script = None;
+    while let Some(arg) = args.next() {
+        if arg == "--run-script" && script.is_none() {
+            script = Some(PathBuf::from(args.next().ok_or("--run-script missing script path")?));
+        } else if arg.to_string_lossy().starts_with('-') || config_path.is_some() {
+            return Err(format!("Unknown argument: {}；use --help to see usage", arg.to_string_lossy()));
+        } else {
+            config_path = Some(PathBuf::from(arg));
+        }
+    }
+    let config_path = config_path.unwrap_or_else(|| PathBuf::from("config.json"));
+    let config = load_config(&config_path)?;
+    if let Some(script) = script {
+        let mut runner = ReactionRunner::new(
+            &config.reaction,
+            &config_path,
+            std::iter::once(script.clone()),
+        )?;
+        let run_id = runner.start(&script)?;
+        println!("[Reaction {run_id}] Running: {}", script.display());
+        while runner.is_busy() {
+            runner.poll();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let status = runner.status();
+        match status.state {
+            RunState::Completed => println!("[Reaction {}] Completed", status.run_id.unwrap()),
+            RunState::Failed(error) => return Err(format!("[Reaction {run_id}] {error}")),
+            _ => return Err(format!("[Reaction {run_id}] Runner did not exit normally")),
+        }
+    } else {
+        let scripts = config.tips.tips.iter()
+            .filter_map(|tip| tip.reaction.as_ref().map(|reaction| reaction.script.clone()))
+            .collect::<Vec<_>>();
+        let runner = ReactionRunner::new(&config.reaction, &config_path, scripts)?;
+        let hotkeys = GlobalHotkeys::new()?;
+        configure_render_environment();
+        run(config.tips, runner, hotkeys);
+    }
+    Ok(())
 }
 
 fn configure_render_environment() {
@@ -58,32 +109,32 @@ fn configure_render_environment() {
     }
 }
 
-fn load_config(path: &Path) -> Result<Tips, String> {
+fn load_config(path: &Path) -> Result<AppConfig, String> {
     let source = fs::read_to_string(path)
-        .map_err(|error| format!("无法读取配置文件 {}：{error}", path.display()))?;
-    let config: Tips = serde_json::from_str(&source)
-        .map_err(|error| format!("无法解析配置文件 {}：{error}", path.display()))?;
-    validate_config(&config)?;
+        .map_err(|error| format!("Failed to read configuration file {}: {error}", path.display()))?;
+    let config: AppConfig = serde_json::from_str(&source)
+        .map_err(|error| format!("Failed to parse configuration file {}: {error}", path.display()))?;
+    validate_config(&config.tips)?;
     Ok(config)
 }
 
 fn validate_config(config: &Tips) -> Result<(), String> {
     if config.tips.is_empty() {
-        return Err("配置中的 tips 不能为空".into());
+        return Err("Tips in the configuration cannot be empty".into());
     }
 
     for (index, tip) in config.tips.iter().enumerate() {
         let name = format!("tips[{index}]");
         if tip.tip.trim().is_empty() {
-            return Err(format!("{name}.tip 不能为空"));
+            return Err(format!("{name}.tip cannot be empty"));
         }
         if tip.interval <= 0 {
-            return Err(format!("{name}.interval must greater than 0"));
+            return Err(format!("{name}.interval must be greater than 0"));
         }
         if let Some(show_time) = tip.show_time
             && show_time <= 0
         {
-            return Err(format!("{name}.showTime must greater than 0"));
+            return Err(format!("{name}.showTime must be greater than 0"));
         }
         if let Some(color) = tip.color.as_deref()
             && !is_valid_tip_color(color)
@@ -95,10 +146,12 @@ fn validate_config(config: &Tips) -> Result<(), String> {
     Ok(())
 }
 
-fn run(config: Tips) {
+fn run(config: Tips, runner: ReactionRunner, hotkeys: GlobalHotkeys) {
     App::new()
         .insert_resource(ClearColor(Color::NONE))
         .insert_resource(JobConfig(config))
+        .insert_resource(runner)
+        .insert_resource(hotkeys)
         .add_plugins(
             DefaultPlugins
                 .set(RenderPlugin {
@@ -125,5 +178,6 @@ fn run(config: Tips) {
                 }),
         )
         .add_plugins(SensoryPlugin)
+        .add_plugins(ReactionPlugin)
         .run();
 }

@@ -1,7 +1,8 @@
 mod job_manager;
 pub mod tip_overlay;
 
-use crate::sensory::job_manager::{ActiveJobState, JobManager};
+pub(crate) use crate::sensory::job_manager::ActiveJobState;
+use crate::sensory::job_manager::JobManager;
 use bevy::prelude::*;
 
 pub struct SensoryPlugin;
