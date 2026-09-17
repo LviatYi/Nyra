@@ -5,13 +5,11 @@ mod runner;
 pub(crate) use global_hotkey::GlobalHotkeys;
 pub use runner::ReactionRunner;
 
-use std::{io::Write, sync::mpsc, time::Duration};
-
-use bevy::{app::AppExit, prelude::*};
-use serde::Deserialize;
-
 use crate::{job::JobConfig, sensory::ActiveJobState};
+use bevy::{app::AppExit, prelude::*};
 use global_hotkey::HotkeyEvent;
+use serde::Deserialize;
+use std::{io::Write, sync::mpsc, time::Duration};
 
 const MAX_LINE_BYTES: usize = 16 * 1024;
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
@@ -122,10 +120,49 @@ macro_rules! decode_sdk_arguments {
     };
 }
 
-macro_rules! define_sdk_bindings {
-    ($(
-        $method:literal($run_id:ident; $($argument:ident: $argument_type:ty),* $(,)?) $body:block
-    )*) => {
+macro_rules! define_sdk {
+    (
+        types {
+            $(
+                $(#[doc = $type_doc:literal])*
+                struct $type_name:ident {
+                    $(
+                        $(#[doc = $field_doc:literal])*
+                        $field:ident: $field_type:ty
+                    ),* $(,)?
+                }
+            )*
+        }
+        context $context:ident {
+            properties {
+                $(
+                    $(#[doc = $property_doc:literal])*
+                    readonly $property:ident: $property_type:ty;
+                )*
+            }
+            methods {
+                $(
+                    $(#[doc = $method_doc:literal])*
+                    $method:literal(
+                        $run_id:ident;
+                        $($argument:ident: $argument_type:ty),* $(,)?
+                    ) $body:block
+                )*
+            }
+        }
+    ) => {
+        $(
+            $(#[doc = $type_doc])*
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase", deny_unknown_fields)]
+            struct $type_name {
+                $(
+                    $(#[doc = $field_doc])*
+                    $field: $field_type,
+                )*
+            }
+        )*
+
         fn dispatch_sdk_request(run_id: &str, request: SdkRequest) -> Result<(), String> {
             match request.method.as_str() {
                 $(
@@ -142,13 +179,66 @@ macro_rules! define_sdk_bindings {
     };
 }
 
-define_sdk_bindings! {
-    "log"(run_id; message: String) {
-        if message.encode_utf16().count() > 2000 {
-            return Err("log(message) length cannot exceed 2000 UTF-16 code units".into());
+include!("sdk.rs");
+
+fn click_screen(point: ScreenPoint) -> Result<(), String> {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::UI::{
+            Input::KeyboardAndMouse::{
+                INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+                MOUSEINPUT, SendInput,
+            },
+            WindowsAndMessaging::SetCursorPos,
+        };
+
+        if SetCursorPos(point.x, point.y) == 0 {
+            return Err(format!(
+                "Failed to move the cursor to ({}, {}): {}",
+                point.x,
+                point.y,
+                std::io::Error::last_os_error()
+            ));
         }
-        writeln!(std::io::stdout().lock(), "[Reaction {run_id}] {message}")
-            .map_err(|error| format!("Failed to write to host log: {error}"))
+
+        let mouse_input = |flags| INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dwFlags: flags,
+                    ..Default::default()
+                },
+            },
+        };
+        let inputs = [
+            mouse_input(MOUSEEVENTF_LEFTDOWN),
+            mouse_input(MOUSEEVENTF_LEFTUP),
+        ];
+        let inserted = SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        );
+        if inserted != inputs.len() as u32 {
+            let error = std::io::Error::last_os_error();
+            if inserted == 1 {
+                let release = mouse_input(MOUSEEVENTF_LEFTUP);
+                let _ = SendInput(1, &release, std::mem::size_of::<INPUT>() as i32);
+            }
+            return Err(format!(
+                "Failed to click at ({}, {}): SendInput inserted {inserted} of {} events ({})",
+                point.x,
+                point.y,
+                inputs.len(),
+                error
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = point;
+        Err("Reaction click currently requires Windows".into())
     }
 }
 

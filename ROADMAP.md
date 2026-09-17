@@ -128,11 +128,11 @@
 
 阶段目标：TS 用顺序异步调用表达动作，Rust 接收、执行并回传结果。
 
-当前已实现 `await ctx.log(message)`：Rust 输出带运行标识的日志，再回传成功或错误；单条消息最多 2000 个 UTF-16 码元。SDK 在 TS 侧拒绝并行调用及入口返回后的调用，入口返回时仍有未完成请求则报告失败。示例已验证两次宿主日志调用及正常结束，用户已确认此前 RustRover 运行配置可用。鼠标动作、宿主等待及完整异常场景验收仍待完成；通信延迟尚未测量。
+当前已实现 `await ctx.log(message)` 与 `await ctx.click({ x, y })`：Rust 可输出带运行标识的日志，或移动系统光标并注入一次左键点击，再回传成功或错误；单条日志最多 2000 个 UTF-16 码元。SDK 在 TS 侧拒绝并行调用及入口返回后的调用，入口返回时仍有未完成请求则报告失败。宿主等待、其余鼠标动作及完整异常场景验收仍待完成；通信延迟尚未测量。
 
-绑定采用通用 TS `callHost(method, args)` 与动态上下文代理；Rust 的 `define_sdk_bindings!` 从单个绑定条目生成方法匹配及位置参数反序列化。新增当前类型的宿主方法只保留 TypeScript 类型契约与 Rust 行为实现，不重复请求 ID、Promise、协议收发、响应关联和参数解析代码。若以后出现不同返回值类型或需由单一 IDL 同时生成跨语言类型，再引入 schema/codegen。
+绑定采用通用 TS `callHost(method, args)` 与动态上下文代理；`src/reaction/sdk.rs` 是 SDK 的 Rust schema，`define_sdk!` 从中生成方法匹配及位置参数反序列化，`build.rs` 同时生成 `runtime/context.d.ts`。新增当前类型的结构体和宿主方法只在该 Rust schema 中声明，不重复维护 TypeScript 类型契约、请求 ID、Promise、协议收发、响应关联和参数解析代码。
 
-- 提供五个最小接口及类型声明：`click(x, y)`、`mouseDown(x, y)`、`mouseUp(x, y)`、`wait(ms)`、`log(message)`；动作及等待必须
+- 提供五个最小接口及类型声明：`click({ x, y })`、`mouseDown({ x, y })`、`mouseUp({ x, y })`、`wait(ms)`、`log(message)`；动作及等待必须
   `await`，日志保证进入有序通道。
 - TS 子进程 stdout 向 Rust 发送结构化请求/日志；Rust 通过子进程 stdin 返回结果。子进程 stderr 承载运行器诊断，Rust
   持续读取两个输出流。

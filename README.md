@@ -101,15 +101,15 @@ export default async function macro(ctx: NyraContext) {
 正常使用时，在 tip 中配置 `reaction.hotkey` 和 `reaction.script`。快捷键支持 `Ctrl`、`Alt`、`Shift`、`Win` 修饰键与字母、数字、
 `F1..F24`、`Space`、`Enter`、`Escape`、`Tab`；功能键可单独使用，其他按键至少需要一个修饰键。脚本相对路径及 Bun
 工作目录均按配置文件所在目录解析。Bun 在 Nyra 启动时自动转换并预加载 TS，运行时不检查类型；修改脚本后重启 Nyra 生效。
-`ctx` 提供只读 `runId` 和 `log(message): Promise<void>`。`await ctx.log(...)` 通过协议请求 Rust 写入自身
-stdout，收到宿主确认后继续执行；日志附带运行标识，单条消息长度最多为 2000 个 UTF-16 码元。 SDK 调用需逐个 `await`
+`ctx` 提供只读 `runId`、`log(message): Promise<void>` 和 `click(point): Promise<void>`。`await ctx.log(...)` 通过协议请求 Rust 写入自身
+stdout，收到宿主确认后继续执行；`await ctx.click({ x, y })` 移动系统光标并执行一次左键点击。日志附带运行标识，单条消息长度最多为 2000 个 UTF-16 码元。 SDK 调用需逐个 `await`
 ，并行调用会失败，入口返回时仍有未完成 SDK 调用也会失败。普通 `console` 输出继续作为诊断转发到 Rust stderr，Bun stdout
 保留给生命周期与 SDK 请求协议。
 
-SDK 绑定由公共 RPC 层处理。`runner.ts` 通过动态上下文将任意方法调用统一编码为 `{ method, args }`，Rust 的
-`define_sdk_bindings!` 宏负责方法匹配和位置参数反序列化。新增一个返回 `Promise<void>` 的宿主方法时，只需在
-`runtime/context.d.ts` 增加面向宏作者的类型声明，并在 `define_sdk_bindings!` 中增加包含宿主行为的绑定条目；不再单独编写 TS
-包装函数、请求/响应关联或 Rust 参数解析代码。
+SDK 绑定由公共 RPC 层处理。`runner.ts` 通过动态上下文将任意方法调用统一编码为 `{ method, args }`。Rust 的
+`src/reaction/sdk.rs` 是 SDK 结构体、方法签名、文档和宿主行为的唯一声明源；`define_sdk!` 生成方法匹配和位置参数反序列化，
+`build.rs` 在任意 Cargo 构建时生成 `runtime/context.d.ts`。新增方法或结构体后运行 `cargo check` 即可刷新声明文件，不要手工编辑
+`.d.ts`；也无需单独编写 TS 包装函数、请求/响应关联或 Rust 参数解析代码。
 
 根配置可增加 `"reaction": { "timeoutMs": 30000 }`，省略时使用 30 秒；允许范围为 1..=300000 毫秒。旧提示配置保持有效，没有脚本时不会启动
 Bun。 Windows 会话中同时只允许一项 Nyra 宏，忙时拒绝新触发。单轮入口结束后 Bun
