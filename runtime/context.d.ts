@@ -9,6 +9,18 @@ export interface ScreenPoint {
     readonly y: number;
 }
 
+/** A grid defined by the centers of its first and last cells. */
+export interface UiGrid {
+    /** Center of the first row and column. */
+    readonly leftTop: ScreenPoint;
+    /** Center of the last row and column; may be above or left of leftTop. */
+    readonly rightBottom: ScreenPoint;
+    /** Number of rows; its absolute value is used and zero means one. */
+    readonly rowCount: number;
+    /** Number of columns; its absolute value is used and zero means one. */
+    readonly colCount: number;
+}
+
 /** Context supplied to the default macro entry point. */
 export interface NyraContext {
     /** Identifier of the current macro execution. */
@@ -17,4 +29,6 @@ export interface NyraContext {
     log(message: string): void;
     /** Queues a left click at a physical pixel coordinate. */
     click(point: ScreenPoint): void;
+    /** Queues a grid click using one-based indices; zero aliases one and negative indices count backward from the end. */
+    click_in_grid(grid: UiGrid, row: number, col: number): void;
 }

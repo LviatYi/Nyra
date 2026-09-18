@@ -213,8 +213,8 @@ fn click_screen(point: &ScreenPoint) -> Result<(), String> {
     unsafe {
         use windows_sys::Win32::UI::{
             Input::KeyboardAndMouse::{
-                INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
-                MOUSEINPUT, SendInput,
+                INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEINPUT,
+                SendInput,
             },
             WindowsAndMessaging::SetCursorPos,
         };
@@ -274,7 +274,7 @@ fn log_in_reaction(run_id: &str, line: u32, message: &str) -> Result<(), String>
         std::io::stdout().lock(),
         "[Reaction {run_id}] [Line {line}] {message}"
     )
-        .map_err(|error| format!("Failed to write to host log: {error}"))
+    .map_err(|error| format!("Failed to write to host log: {error}"))
 }
 
 fn respond(

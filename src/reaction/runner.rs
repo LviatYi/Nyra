@@ -13,9 +13,9 @@ use serde::Deserialize;
 
 use super::{
     MAX_LINE_BYTES, MAX_OUTPUT_BYTES, POLL_INTERVAL, RunState, RunStatus, SdkInstruction,
-    dispatch_sdk_instruction, validate_sdk_instruction,
+    dispatch_sdk_instruction,
     process_job::{ProcessJob, ScriptSlot},
-    respond,
+    respond, validate_sdk_instruction,
 };
 
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -588,11 +588,7 @@ fn execute_instruction_batch(
     for (index, instruction) in instructions.into_iter().enumerate() {
         let line = instruction.line;
         dispatch_sdk_instruction(run_id, instruction).map_err(|error| {
-            format!(
-                "Instruction {} at line {} failed: {error}",
-                index + 1,
-                line,
-            )
+            format!("Instruction {} at line {} failed: {error}", index + 1, line,)
         })?;
     }
     Ok(())

@@ -87,7 +87,9 @@ impl Hotkey {
             _ => return Err(format!("Unsupported hotkey key: {key}")),
         };
         if modifier_bits == 0 && !plain_key_allowed {
-            return Err("Letters, numbers, and ordinary keys must have at least one modifier key".into());
+            return Err(
+                "Letters, numbers, and ordinary keys must have at least one modifier key".into(),
+            );
         }
 
         let mut display_parts = Vec::new();

@@ -157,7 +157,9 @@ fn hotkey_thread(
     _events: mpsc::Sender<HotkeyEvent>,
     startup: mpsc::SyncSender<Result<u32, String>>,
 ) {
-    let _ = startup.send(Err("Global hotkeys are currently only supported on Windows".into()));
+    let _ = startup.send(Err(
+        "Global hotkeys are currently only supported on Windows".into(),
+    ));
 }
 
 #[cfg(windows)]

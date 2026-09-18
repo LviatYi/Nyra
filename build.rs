@@ -93,8 +93,8 @@ include!("src/reaction/sdk.rs");
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/reaction/sdk.rs");
-    let path = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap())
-        .join("runtime/context.d.ts");
+    let path =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("runtime/context.d.ts");
     let declaration = generate_context_declaration();
     if fs::read_to_string(&path).ok().as_deref() != Some(&declaration) {
         fs::write(path, declaration).expect("failed to generate runtime/context.d.ts");
@@ -137,17 +137,15 @@ fn typescript_type(rust_type: &str) -> String {
     match compact.as_str() {
         "String" | "str" | "&str" | "char" => "string".into(),
         "bool" => "boolean".into(),
-        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32"
-        | "u64" | "u128" | "usize" | "f32" | "f64" => "number".into(),
+        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128"
+        | "usize" | "f32" | "f64" => "number".into(),
         "serde_json::Value" => "unknown".into(),
-        _ if compact.starts_with("Option<") && compact.ends_with('>') => format!(
-            "{} | null",
-            typescript_type(&compact[7..compact.len() - 1])
-        ),
-        _ if compact.starts_with("Vec<") && compact.ends_with('>') => format!(
-            "Array<{}>",
-            typescript_type(&compact[4..compact.len() - 1])
-        ),
+        _ if compact.starts_with("Option<") && compact.ends_with('>') => {
+            format!("{} | null", typescript_type(&compact[7..compact.len() - 1]))
+        }
+        _ if compact.starts_with("Vec<") && compact.ends_with('>') => {
+            format!("Array<{}>", typescript_type(&compact[4..compact.len() - 1]))
+        }
         _ => compact,
     }
 }

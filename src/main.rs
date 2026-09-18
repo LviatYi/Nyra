@@ -10,9 +10,7 @@ use std::{
 };
 
 use crate::job::{JobConfig, Tips, is_valid_tip_color};
-use crate::reaction::{
-    GlobalHotkeys, ReactionConfig, ReactionPlugin, ReactionRunner, RunState,
-};
+use crate::reaction::{GlobalHotkeys, ReactionConfig, ReactionPlugin, ReactionRunner, RunState};
 use crate::sensory::SensoryPlugin;
 use crate::settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use bevy::{
@@ -33,8 +31,13 @@ struct AppConfig {
 }
 
 fn main() -> ExitCode {
-    if env::args_os().skip(1).any(|arg| arg == "--help" || arg == "-h") {
-        println!("Usage: nyra.exe [config.json] [--run-script script.ts]\nScript paths are resolved relative to the configuration file directory; --run-script only executes the script without launching the floating window.");
+    if env::args_os()
+        .skip(1)
+        .any(|arg| arg == "--help" || arg == "-h")
+    {
+        println!(
+            "Usage: nyra.exe [config.json] [--run-script script.ts]\nScript paths are resolved relative to the configuration file directory; --run-script only executes the script without launching the floating window."
+        );
         return ExitCode::SUCCESS;
     }
     match launch() {
@@ -54,9 +57,14 @@ fn launch() -> Result<(), String> {
     let mut script = None;
     while let Some(arg) = args.next() {
         if arg == "--run-script" && script.is_none() {
-            script = Some(PathBuf::from(args.next().ok_or("--run-script missing script path")?));
+            script = Some(PathBuf::from(
+                args.next().ok_or("--run-script missing script path")?,
+            ));
         } else if arg.to_string_lossy().starts_with('-') || config_path.is_some() {
-            return Err(format!("Unknown argument: {}；use --help to see usage", arg.to_string_lossy()));
+            return Err(format!(
+                "Unknown argument: {}；use --help to see usage",
+                arg.to_string_lossy()
+            ));
         } else {
             config_path = Some(PathBuf::from(arg));
         }
@@ -82,8 +90,15 @@ fn launch() -> Result<(), String> {
             _ => return Err(format!("[Reaction {run_id}] Runner did not exit normally")),
         }
     } else {
-        let scripts = config.tips.tips.iter()
-            .filter_map(|tip| tip.reaction.as_ref().map(|reaction| reaction.script.clone()))
+        let scripts = config
+            .tips
+            .tips
+            .iter()
+            .filter_map(|tip| {
+                tip.reaction
+                    .as_ref()
+                    .map(|reaction| reaction.script.clone())
+            })
             .collect::<Vec<_>>();
         let runner = ReactionRunner::new(&config.reaction, &config_path, scripts)?;
         let hotkeys = GlobalHotkeys::new()?;
@@ -142,10 +157,18 @@ fn configure_render_environment() {
 }
 
 fn load_config(path: &Path) -> Result<AppConfig, String> {
-    let source = fs::read_to_string(path)
-        .map_err(|error| format!("Failed to read configuration file {}: {error}", path.display()))?;
-    let config: AppConfig = serde_json::from_str(&source)
-        .map_err(|error| format!("Failed to parse configuration file {}: {error}", path.display()))?;
+    let source = fs::read_to_string(path).map_err(|error| {
+        format!(
+            "Failed to read configuration file {}: {error}",
+            path.display()
+        )
+    })?;
+    let config: AppConfig = serde_json::from_str(&source).map_err(|error| {
+        format!(
+            "Failed to parse configuration file {}: {error}",
+            path.display()
+        )
+    })?;
     validate_config(&config.tips)?;
     Ok(config)
 }
