@@ -15,10 +15,18 @@ interface PendingCall {
     reject: (error: Error) => void;
 }
 
+interface Instruction {
+    line: number;
+    method: string;
+    args: unknown[];
+}
+
 interface RunSession {
     runId: string;
+    scriptPath: string;
     acceptingCalls: boolean;
     nextRequestId: number;
+    instructions: Instruction[];
     pending?: PendingCall;
 }
 
@@ -47,7 +55,7 @@ function stopPending(session: RunSession): void {
     if (!session.pending) return;
     const pending = session.pending;
     session.pending = undefined;
-    pending.reject(new Error("Macro stopped before SDK call completed"));
+    pending.reject(new Error("Macro stopped before its instruction batch completed"));
 }
 
 function fatal(error: unknown): void {
@@ -135,39 +143,57 @@ function handleResponse(response: any): void {
     else call.reject(new Error(response.error));
 }
 
-function callHost(session: RunSession, method: string, args: unknown[]): Promise<void> {
+function captureSourceLine(scriptPath: string): number {
+    const stack = new Error().stack;
+    if (!stack) throw new Error("Unable to capture SDK instruction source line");
+    const normalizedPath = scriptPath.replaceAll("\\", "/").toLowerCase();
+    for (const frame of stack.split("\n").slice(1)) {
+        const normalizedFrame = frame.replaceAll("\\", "/");
+        const pathIndex = normalizedFrame.toLowerCase().indexOf(normalizedPath);
+        if (pathIndex === -1) continue;
+        const suffix = normalizedFrame.slice(pathIndex + normalizedPath.length);
+        const location = /^:(\d+):\d+\)?$/.exec(suffix);
+        if (!location) continue;
+        const line = Number(location[1]);
+        if (Number.isSafeInteger(line) && line > 0) return line;
+    }
+    throw new Error(`Unable to locate an SDK instruction call in ${scriptPath}`);
+}
+
+function enqueueInstruction(session: RunSession, method: string, args: unknown[]): void {
     if (activeRun !== session || !session.acceptingCalls || fatalExiting) {
-        throw new Error("SDK calls are not allowed after the macro entry returns");
+        throw new Error("SDK instructions are not allowed after the macro entry returns");
     }
-    if (session.pending) {
-        const error = new Error("Concurrent SDK calls are not allowed; await each call");
-        fatal(error);
-        throw error;
-    }
-    if (!Number.isSafeInteger(session.nextRequestId)) {
-        throw new Error("SDK request ID exhausted");
-    }
+    session.instructions.push({
+        line: captureSourceLine(session.scriptPath),
+        method,
+        args: structuredClone(args),
+    });
+}
+
+function submitBatch(session: RunSession): Promise<void> {
     const id = session.nextRequestId++;
     return new Promise<void>((resolve, reject) => {
         session.pending = {id, resolve, reject};
         void writeMessage({
             version: 1,
             runId: session.runId,
-            event: "request",
-            request: {id, method, args},
+            event: "batch",
+            requestId: id,
+            instructions: session.instructions,
         }).catch(fatal);
     });
 }
 
 function createContext(session: RunSession): NyraContext {
-    const boundMethods = new Map<string, (...args: unknown[]) => Promise<void>>();
+    const boundMethods = new Map<string, (...args: unknown[]) => void>();
     return new Proxy(Object.freeze({runId: session.runId}), {
         get(target, property, receiver) {
             if (Reflect.has(target, property)) return Reflect.get(target, property, receiver);
             if (typeof property !== "string") return undefined;
             let binding = boundMethods.get(property);
             if (!binding) {
-                binding = (...args: unknown[]) => callHost(session, property, args);
+                binding = (...args: unknown[]) => enqueueInstruction(session, property, args);
                 boundMethods.set(property, binding);
             }
             return binding;
@@ -176,36 +202,36 @@ function createContext(session: RunSession): NyraContext {
     }) as NyraContext;
 }
 
-async function loadMacro(scriptPath: string): Promise<(context: NyraContext) => Promise<void>> {
+type Macro = (context: NyraContext) => void | Promise<void>;
+
+async function loadMacro(scriptPath: string): Promise<Macro> {
     const module = await import(pathToFileURL(scriptPath).href);
     if (typeof module.default !== "function") {
-        throw new Error(`${scriptPath}: default export must be an async function`);
+        throw new Error(`${scriptPath}: default export must be a function`);
     }
     return module.default;
 }
 
 async function executeMacro(
-    macro: (context: NyraContext) => Promise<void>,
+    macro: Macro,
     runId: string,
+    scriptPath: string,
 ): Promise<void> {
     const session: RunSession = {
         runId,
+        scriptPath,
         acceptingCalls: true,
         nextRequestId: 1,
+        instructions: [],
     };
     activeRun = session;
     let failure: unknown;
     try {
         const result = macro(createContext(session));
-        if (!(result instanceof Promise)) {
-            throw new Error("Macro entry must return a Promise");
-        }
         await result;
         session.acceptingCalls = false;
-        if (session.pending) {
-            throw new Error("Macro returned with an unfinished SDK call; await every call");
-        }
         await new Promise<void>((resolve) => setImmediate(resolve));
+        await submitBatch(session);
     } catch (error) {
         failure = error ?? "Macro failed";
         session.acceptingCalls = false;
@@ -241,7 +267,11 @@ async function runRunner(scriptPaths: string[]): Promise<void> {
                 throw new Error("Invalid run command");
             }
             if (activeRun) throw new Error("A macro is already running");
-            void executeMacro(macros[message.scriptId], message.runId).catch(fatal);
+            void executeMacro(
+                macros[message.scriptId],
+                message.runId,
+                scriptPaths[message.scriptId],
+            ).catch(fatal);
         };
         await writeMessage({
             version: 1,

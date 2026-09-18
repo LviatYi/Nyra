@@ -100,10 +100,23 @@ fn update_runner(
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SdkRequest {
-    id: u64,
+struct SdkInstruction {
+    line: u32,
     method: String,
     args: serde_json::Value,
+}
+
+macro_rules! validate_sdk_arguments {
+    ($method:expr, $args:expr;) => {
+        serde_json::from_value::<[serde_json::Value; 0]>($args.clone())
+            .map(|_| ())
+            .map_err(|error| format!("SDK {} arguments are invalid: {error}", $method))
+    };
+    ($method:expr, $args:expr; $($argument_type:ty),+ $(,)?) => {
+        serde_json::from_value::<($($argument_type,)+)>($args.clone())
+            .map(|_| ())
+            .map_err(|error| format!("SDK {} arguments are invalid: {error}", $method))
+    };
 }
 
 macro_rules! decode_sdk_arguments {
@@ -144,7 +157,7 @@ macro_rules! define_sdk {
                 $(
                     $(#[doc = $method_doc:literal])*
                     $method:literal(
-                        $run_id:ident;
+                        $run_id:ident, $line:ident;
                         $($argument:ident: $argument_type:ty),* $(,)?
                     ) $body:block
                 )*
@@ -163,13 +176,27 @@ macro_rules! define_sdk {
             }
         )*
 
-        fn dispatch_sdk_request(run_id: &str, request: SdkRequest) -> Result<(), String> {
-            match request.method.as_str() {
+        fn validate_sdk_instruction(instruction: &SdkInstruction) -> Result<(), String> {
+            match instruction.method.as_str() {
+                $(
+                    $method => validate_sdk_arguments!(instruction.method, instruction.args;
+                        $($argument_type),*),
+                )*
+                method => Err(format!("Unknown SDK method: {method}")),
+            }
+        }
+
+        fn dispatch_sdk_instruction(
+            run_id: &str,
+            instruction: SdkInstruction,
+        ) -> Result<(), String> {
+            match instruction.method.as_str() {
                 $(
                     $method => {
-                        decode_sdk_arguments!(request.method, request.args;
+                        decode_sdk_arguments!(instruction.method, instruction.args;
                             $($argument: $argument_type),*);
                         let $run_id = run_id;
+                        let $line = instruction.line;
                         (|| -> Result<(), String> { $body })()
                     }
                 )*
@@ -242,8 +269,11 @@ fn click_screen(point: &ScreenPoint) -> Result<(), String> {
     }
 }
 
-fn log_in_reaction(run_id: &str, message: &str) -> Result<(), String> {
-    writeln!(std::io::stdout().lock(), "[Reaction {run_id}] {message}")
+fn log_in_reaction(run_id: &str, line: u32, message: &str) -> Result<(), String> {
+    writeln!(
+        std::io::stdout().lock(),
+        "[Reaction {run_id}] [Line {line}] {message}"
+    )
         .map_err(|error| format!("Failed to write to host log: {error}"))
 }
 

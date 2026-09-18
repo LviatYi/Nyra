@@ -1,10 +1,10 @@
 define_sdk! {
     types {
-        /// An integer coordinate in the Windows virtual screen coordinate space.
+        /// A physical pixel coordinate in the Windows virtual screen coordinate space.
         struct ScreenPoint {
-            /// Horizontal screen coordinate.
+            /// Horizontal physical pixel coordinate.
             x: i32,
-            /// Vertical screen coordinate.
+            /// Vertical physical pixel coordinate.
             y: i32,
         }
     }
@@ -14,19 +14,23 @@ define_sdk! {
             readonly run_id: String;
         }
         methods {
-            /// Writes through the Rust host; await its acknowledgement before continuing.
-            "log"(run_id; message: String) {
+            /// Queues a message for the Rust host to write during instruction execution.
+            "log"(run_id, line; message: String) {
                 if message.encode_utf16().count() > 2000 {
                     return Err("log(message) length cannot exceed 2000 UTF-16 code units".into());
                 }
 
-                log_in_reaction(run_id, &message)
+                log_in_reaction(run_id, line, &message)
             }
-            /// Moves the cursor to an integer screen coordinate and performs a left click.
-            "click"(run_id; point: ScreenPoint) {
+            /// Queues a left click at a physical pixel coordinate.
+            "click"(run_id, line; point: ScreenPoint) {
                 click_screen(&point)?;
 
-                log_in_reaction(run_id, &format!("CLICK AT ({}, {})", point.x, point.y))
+                log_in_reaction(
+                    run_id,
+                    line,
+                    &format!("CLICK AT ({}, {})", point.x, point.y),
+                )
             }
         }
     }

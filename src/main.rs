@@ -47,6 +47,8 @@ fn main() -> ExitCode {
 }
 
 fn launch() -> Result<(), String> {
+    configure_dpi_awareness()?;
+
     let mut args = env::args_os().skip(1);
     let mut config_path = None;
     let mut script = None;
@@ -88,6 +90,36 @@ fn launch() -> Result<(), String> {
         configure_render_environment();
         run(config.tips, runner, hotkeys);
     }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn configure_dpi_awareness() -> Result<(), String> {
+    use windows_sys::Win32::UI::HiDpi::{
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, DPI_AWARENESS_PER_MONITOR_AWARE,
+        GetAwarenessFromDpiAwarenessContext, GetThreadDpiAwarenessContext,
+        SetProcessDpiAwarenessContext,
+    };
+
+    unsafe {
+        if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) != 0 {
+            return Ok(());
+        }
+
+        let error = std::io::Error::last_os_error();
+        let awareness = GetAwarenessFromDpiAwarenessContext(GetThreadDpiAwarenessContext());
+        if awareness == DPI_AWARENESS_PER_MONITOR_AWARE {
+            Ok(())
+        } else {
+            Err(format!(
+                "Unable to enable physical screen coordinates with Per-Monitor V2 DPI awareness: {error}"
+            ))
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn configure_dpi_awareness() -> Result<(), String> {
     Ok(())
 }
 

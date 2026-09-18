@@ -12,8 +12,8 @@ use bevy::prelude::Resource;
 use serde::Deserialize;
 
 use super::{
-    MAX_LINE_BYTES, MAX_OUTPUT_BYTES, POLL_INTERVAL, RunState, RunStatus, SdkRequest,
-    dispatch_sdk_request,
+    MAX_LINE_BYTES, MAX_OUTPUT_BYTES, POLL_INTERVAL, RunState, RunStatus, SdkInstruction,
+    dispatch_sdk_instruction, validate_sdk_instruction,
     process_job::{ProcessJob, ScriptSlot},
     respond,
 };
@@ -58,10 +58,11 @@ enum RunnerMessage {
         run_id: String,
         error: String,
     },
-    Request {
+    Batch {
         version: u32,
         run_id: String,
-        request: SdkRequest,
+        request_id: u64,
+        instructions: Vec<SdkInstruction>,
     },
 }
 
@@ -469,24 +470,24 @@ fn run_worker(
                     RunnerMessage::StartupFailed { version: 1, error } if !ready => {
                         break Err(format!("Resident Bun failed to load script: {error}"));
                     }
-                    RunnerMessage::Request {
+                    RunnerMessage::Batch {
                         version: 1,
                         run_id,
-                        request,
+                        request_id,
+                        instructions,
                     } => {
                         let run = active
                             .as_mut()
-                            .ok_or("Idle resident Bun sent an SDK request")?;
+                            .ok_or("Idle resident Bun sent an SDK instruction batch")?;
                         if run.run_id != run_id
-                            || request.id != run.next_request_id
-                            || request.id > 9_007_199_254_740_991
+                            || request_id != run.next_request_id
+                            || request_id > 9_007_199_254_740_991
                         {
-                            break Err("SDK request run ID or request ID does not match".into());
+                            break Err("SDK batch run ID or request ID does not match".into());
                         }
                         run.next_request_id += 1;
-                        let id = request.id;
-                        let result = dispatch_sdk_request(&run_id, request);
-                        respond(&input_tx, &run_id, id, result)?;
+                        let result = execute_instruction_batch(&run_id, instructions);
+                        respond(&input_tx, &run_id, request_id, result)?;
                     }
                     RunnerMessage::Completed { version: 1, run_id } => {
                         let run = active
@@ -564,22 +565,65 @@ fn send_json(
         .map_err(|error| format!("Failed to send resident Bun command: {error}"))
 }
 
+fn execute_instruction_batch(
+    run_id: &str,
+    instructions: Vec<SdkInstruction>,
+) -> Result<(), String> {
+    for (index, instruction) in instructions.iter().enumerate() {
+        if instruction.line == 0 {
+            return Err(format!(
+                "Instruction {} has an invalid source line",
+                index + 1
+            ));
+        }
+        validate_sdk_instruction(instruction).map_err(|error| {
+            format!(
+                "Instruction {} at line {} is invalid: {error}",
+                index + 1,
+                instruction.line,
+            )
+        })?;
+    }
+
+    for (index, instruction) in instructions.into_iter().enumerate() {
+        let line = instruction.line;
+        dispatch_sdk_instruction(run_id, instruction).map_err(|error| {
+            format!(
+                "Instruction {} at line {} failed: {error}",
+                index + 1,
+                line,
+            )
+        })?;
+    }
+    Ok(())
+}
+
 fn read_output(pipe: impl Read, diagnostic: bool, events: mpsc::SyncSender<WorkerEvent>) {
     let mut reader = BufReader::new(pipe);
+    let max_line_bytes = if diagnostic {
+        MAX_LINE_BYTES
+    } else {
+        MAX_OUTPUT_BYTES
+    };
     loop {
         let mut bytes = Vec::new();
         match reader
             .by_ref()
-            .take((MAX_LINE_BYTES + 1) as u64)
+            .take((max_line_bytes + 1) as u64)
             .read_until(b'\n', &mut bytes)
         {
             Ok(0) => {
                 let _ = events.send(WorkerEvent::Closed);
                 break;
             }
-            Ok(_) if bytes.len() > MAX_LINE_BYTES => {
+            Ok(_) if bytes.len() > max_line_bytes => {
                 let _ = events.send(WorkerEvent::Error(
-                    "Script output line exceeds 16 KiB".into(),
+                    if diagnostic {
+                        "Script diagnostic line exceeds 16 KiB"
+                    } else {
+                        "Script protocol message exceeds 1 MiB"
+                    }
+                    .into(),
                 ));
                 break;
             }

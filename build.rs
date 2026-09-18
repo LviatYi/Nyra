@@ -24,7 +24,7 @@ macro_rules! define_sdk {
                 $(
                     $(#[doc = $method_doc:literal])*
                     $method:literal(
-                        $run_id:ident;
+                        $run_id:ident, $line:ident;
                         $($argument:ident: $argument_type:ty),* $(,)?
                     ) $body:block
                 )*
@@ -51,7 +51,7 @@ macro_rules! define_sdk {
                 )*
                 output.push_str("}\n\n");
             )*
-            output.push_str("/** Context supplied to the default async macro entry point. */\n");
+            output.push_str("/** Context supplied to the default macro entry point. */\n");
             output.push_str("export interface ");
             output.push_str(stringify!($context));
             output.push_str(" {\n");
@@ -77,8 +77,9 @@ macro_rules! define_sdk {
                     output.push_str(&typescript_type(stringify!($argument_type)));
                 )*
                 let _ = separator;
-                output.push_str("): Promise<void>;\n");
+                output.push_str("): void;\n");
                 let _ = stringify!($run_id);
+                let _ = stringify!($line);
                 let _ = stringify!($body);
             )*
             output.push_str("}\n");

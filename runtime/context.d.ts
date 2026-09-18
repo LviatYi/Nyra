@@ -1,20 +1,20 @@
 // AUTO-GENERATED from src/reaction/sdk.rs by build.rs.
 // Run `cargo check` (or any Cargo build) to regenerate. Do not edit directly.
 
-/** An integer coordinate in the Windows virtual screen coordinate space. */
+/** A physical pixel coordinate in the Windows virtual screen coordinate space. */
 export interface ScreenPoint {
-    /** Horizontal screen coordinate. */
+    /** Horizontal physical pixel coordinate. */
     readonly x: number;
-    /** Vertical screen coordinate. */
+    /** Vertical physical pixel coordinate. */
     readonly y: number;
 }
 
-/** Context supplied to the default async macro entry point. */
+/** Context supplied to the default macro entry point. */
 export interface NyraContext {
     /** Identifier of the current macro execution. */
     readonly runId: string;
-    /** Writes through the Rust host; await its acknowledgement before continuing. */
-    log(message: string): Promise<void>;
-    /** Moves the cursor to an integer screen coordinate and performs a left click. */
-    click(point: ScreenPoint): Promise<void>;
+    /** Queues a message for the Rust host to write during instruction execution. */
+    log(message: string): void;
+    /** Queues a left click at a physical pixel coordinate. */
+    click(point: ScreenPoint): void;
 }
