@@ -68,14 +68,14 @@ fn launch() -> Result<(), String> {
             std::iter::once(script.clone()),
         )?;
         let run_id = runner.start(&script)?;
-        println!("[Reaction {run_id}] Running: {}", script.display());
+        println!("[Reaction {run_id}] RUNNING SCRIPT {}", script.display());
         while runner.is_busy() {
             runner.poll();
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         let status = runner.status();
         match status.state {
-            RunState::Completed => println!("[Reaction {}] Completed", status.run_id.unwrap()),
+            RunState::Completed => println!("[Reaction {}] COMPLETED", status.run_id.unwrap()),
             RunState::Failed(error) => return Err(format!("[Reaction {run_id}] {error}")),
             _ => return Err(format!("[Reaction {run_id}] Runner did not exit normally")),
         }

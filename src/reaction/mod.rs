@@ -181,7 +181,7 @@ macro_rules! define_sdk {
 
 include!("sdk.rs");
 
-fn click_screen(point: ScreenPoint) -> Result<(), String> {
+fn click_screen(point: &ScreenPoint) -> Result<(), String> {
     #[cfg(windows)]
     unsafe {
         use windows_sys::Win32::UI::{
@@ -240,6 +240,11 @@ fn click_screen(point: ScreenPoint) -> Result<(), String> {
         let _ = point;
         Err("Reaction click currently requires Windows".into())
     }
+}
+
+fn log_in_reaction(run_id: &str, message: &str) -> Result<(), String> {
+    writeln!(std::io::stdout().lock(), "[Reaction {run_id}] {message}")
+        .map_err(|error| format!("Failed to write to host log: {error}"))
 }
 
 fn respond(

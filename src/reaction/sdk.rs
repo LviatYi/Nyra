@@ -19,12 +19,14 @@ define_sdk! {
                 if message.encode_utf16().count() > 2000 {
                     return Err("log(message) length cannot exceed 2000 UTF-16 code units".into());
                 }
-                writeln!(std::io::stdout().lock(), "[Reaction {run_id}] {message}")
-                    .map_err(|error| format!("Failed to write to host log: {error}"))
+
+                log_in_reaction(run_id, &message)
             }
             /// Moves the cursor to an integer screen coordinate and performs a left click.
-            "click"(_run_id; point: ScreenPoint) {
-                click_screen(point)
+            "click"(run_id; point: ScreenPoint) {
+                click_screen(&point)?;
+
+                log_in_reaction(run_id, &format!("CLICK AT ({}, {})", point.x, point.y))
             }
         }
     }
