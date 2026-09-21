@@ -1,7 +1,7 @@
 import {Console} from "node:console";
 import {pathToFileURL} from "node:url";
 import distribution from "./bun.json";
-import type {NyraContext} from "./context";
+import {createLocalMethods, type NyraContext} from "./sdk";
 
 const args = process.argv.slice(2);
 const writeProtocol = process.stdout.write.bind(process.stdout);
@@ -186,10 +186,16 @@ function submitBatch(session: RunSession): Promise<void> {
 }
 
 function createContext(session: RunSession): NyraContext {
+    const localMethods = createLocalMethods((point, message) => {
+        enqueueInstruction(session, "click_with_log", [point, message]);
+    });
     const boundMethods = new Map<string, (...args: unknown[]) => void>();
     return new Proxy(Object.freeze({runId: session.runId}), {
         get(target, property, receiver) {
             if (Reflect.has(target, property)) return Reflect.get(target, property, receiver);
+            if (Reflect.has(localMethods, property)) {
+                return Reflect.get(localMethods, property, localMethods);
+            }
             if (typeof property !== "string") return undefined;
             let binding = boundMethods.get(property);
             if (!binding) {

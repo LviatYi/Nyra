@@ -41,7 +41,7 @@ if (!$bunReady) {
     Copy-Item -LiteralPath $cachedBun -Destination $bun -Force
 }
 
-foreach ($file in @('runner.ts', 'context.d.ts', 'bun.json', 'bunfig.toml')) {
+foreach ($file in @('runner.ts', 'sdk.ts', 'context.d.ts', 'bun.json', 'bunfig.toml')) {
     Copy-Item -LiteralPath (Join-Path $projectRoot "runtime/$file") -Destination $RuntimeDirectory -Force
 }
 
