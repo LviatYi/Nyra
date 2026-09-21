@@ -186,9 +186,10 @@ function submitBatch(session: RunSession): Promise<void> {
 }
 
 function createContext(session: RunSession): NyraContext {
-    const localMethods = createLocalMethods((point, message) => {
-        enqueueInstruction(session, "click_with_log", [point, message]);
-    });
+    const localMethods = createLocalMethods(
+        (point, options) => enqueueInstruction(session, "click", [point, options]),
+        (durationMs) => enqueueInstruction(session, "delay", [durationMs]),
+    );
     const boundMethods = new Map<string, (...args: unknown[]) => void>();
     return new Proxy(Object.freeze({runId: session.runId}), {
         get(target, property, receiver) {

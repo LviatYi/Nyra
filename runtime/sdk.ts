@@ -1,6 +1,23 @@
-import type {NyraContext as NativeContext, ScreenPoint} from "./context";
+import type {
+    ClickOptions as NativeClickOptions,
+    NyraContext as NativeContext,
+    ScreenPoint,
+    UiCondition,
+} from "./context";
 
-export type {ScreenPoint} from "./context";
+export type {ScreenPoint, UiCondition} from "./context";
+
+/** User-facing click options. Omitted values are filled before serialization. */
+export interface ClickOptions {
+    /** Fixed delay emitted as a separate instruction after the click. Defaults to 100 ms. */
+    readonly delayMs?: number;
+    /** Reserved UI condition evaluated by Rust after the click. */
+    readonly condition?: UiCondition | null;
+    /** Condition timeout. Defaults to 3000 ms. */
+    readonly timeoutMs?: number;
+    /** Condition polling interval. Defaults to 50 ms. */
+    readonly pollIntervalMs?: number;
+}
 
 /** A grid defined by the centers of its first and last cells. */
 export interface UiGrid {
@@ -14,7 +31,12 @@ export interface UiGrid {
     readonly colCount: number;
 }
 
-type ClickWithLog = (point: ScreenPoint, message: string) => void;
+type NativeClick = (point: ScreenPoint, options: NativeClickOptions) => void;
+type NativeDelay = (durationMs: number) => void;
+
+const defaultDelayMs = 50;
+const defaultTimeoutMs = 3_000;
+const defaultPollIntervalMs = 50;
 
 const i32Min = -2_147_483_648n;
 const i32Max = 2_147_483_647n;
@@ -24,6 +46,39 @@ function integer(value: number, name: string): bigint {
         throw new Error(`${name} must be a safe integer`);
     }
     return BigInt(value);
+}
+
+function milliseconds(value: number, name: string, allowZero: boolean): number {
+    if (!Number.isSafeInteger(value) || value < 0 || (!allowZero && value === 0)) {
+        const range = allowZero ? "a non-negative safe integer" : "a positive safe integer";
+        throw new Error(`${name} must be ${range}`);
+    }
+    return value;
+}
+
+function completeClickOptions(
+    options: ClickOptions | undefined,
+    message: string | null,
+): {native: NativeClickOptions; delayMs: number} {
+    const delayMs = milliseconds(options?.delayMs ?? defaultDelayMs, "delayMs", true);
+    const timeoutMs = milliseconds(options?.timeoutMs ?? defaultTimeoutMs, "timeoutMs", false);
+    const pollIntervalMs = milliseconds(
+        options?.pollIntervalMs ?? defaultPollIntervalMs,
+        "pollIntervalMs",
+        false,
+    );
+    if (pollIntervalMs > timeoutMs) {
+        throw new Error("pollIntervalMs cannot exceed timeoutMs");
+    }
+    return {
+        native: {
+            message,
+            condition: options?.condition ?? null,
+            timeoutMs,
+            pollIntervalMs,
+        },
+        delayMs,
+    };
 }
 
 function count(value: number, name: string): bigint {
@@ -68,9 +123,25 @@ function arrayIndex(index: number, length: number): number {
     return Number(resolved);
 }
 
-export function createLocalMethods(clickWithLog: ClickWithLog) {
+export function createLocalMethods(clickNative: NativeClick, delayNative: NativeDelay) {
+    function enqueueClick(
+        point: ScreenPoint,
+        message: string | null,
+        options?: ClickOptions,
+    ): void {
+        const complete = completeClickOptions(options, message);
+        clickNative(point, complete.native);
+        if (complete.delayMs > 0) {
+            delayNative(complete.delayMs);
+        }
+    }
+
     return Object.freeze({
-        click_in_grid(grid: UiGrid, row: number, col: number): void {
+        click(point: ScreenPoint, options?: ClickOptions): void {
+            enqueueClick(point, null, options);
+        },
+
+        click_in_grid(grid: UiGrid, row: number, col: number, options?: ClickOptions): void {
             const point = {
                 x: axisCoordinate(
                     grid.leftTop.x,
@@ -87,9 +158,10 @@ export function createLocalMethods(clickWithLog: ClickWithLog) {
                     "grid y",
                 ),
             };
-            clickWithLog(
+            enqueueClick(
                 point,
                 `CLICK IN GRID AT (${row}, ${col}) RESOLVED TO (${point.x}, ${point.y})`,
+                options,
             );
         },
 
@@ -98,6 +170,7 @@ export function createLocalMethods(clickWithLog: ClickWithLog) {
             end: ScreenPoint,
             itemCount: number,
             index: number,
+            options?: ClickOptions,
         ): void {
             const horizontal = start.y === end.y && start.x !== end.x;
             const vertical = start.x === end.x && start.y !== end.y;
@@ -115,26 +188,32 @@ export function createLocalMethods(clickWithLog: ClickWithLog) {
                     x: start.x,
                     y: axisCoordinate(start.y, end.y, itemCount, index, "line y"),
                 };
-            clickWithLog(
+            enqueueClick(
                 point,
                 `CLICK IN LINE AT ${index} RESOLVED TO (${point.x}, ${point.y})`,
+                options,
             );
         },
 
-        click_in_array(points: readonly ScreenPoint[], index: number): void {
+        click_in_array(
+            points: readonly ScreenPoint[],
+            index: number,
+            options?: ClickOptions,
+        ): void {
             if (points.length === 0) {
                 throw new Error("click_in_array requires at least one point");
             }
             const resolvedIndex = arrayIndex(index, points.length);
             const source = points[resolvedIndex];
             const point = {x: source.x, y: source.y};
-            clickWithLog(
+            enqueueClick(
                 point,
                 `CLICK IN ARRAY AT ${index} RESOLVED TO (${point.x}, ${point.y})`,
+                options,
             );
         },
     });
 }
 
 export type LocalContext = ReturnType<typeof createLocalMethods>;
-export type NyraContext = Omit<NativeContext, "click_with_log"> & LocalContext;
+export type NyraContext = Omit<NativeContext, "click"> & LocalContext;
