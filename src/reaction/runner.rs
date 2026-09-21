@@ -139,7 +139,7 @@ impl ReactionRunner {
         //         worker: None,
         //     });
         // }
-        for name in ["bun.exe", "runner.ts", "bun.json", "bunfig.toml"] {
+        for name in ["bun.exe", "runner.ts", "sdk.ts", "bun.json", "bunfig.toml"] {
             let path = runtime_dir.join(name);
             if !path.is_file() {
                 return Err(format!(

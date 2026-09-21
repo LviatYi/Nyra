@@ -1,5 +1,13 @@
 use std::{env, fs, path::PathBuf};
 
+const RUNTIME_FILES: [&str; 5] = [
+    "runner.ts",
+    "sdk.ts",
+    "context.d.ts",
+    "bun.json",
+    "bunfig.toml",
+];
+
 macro_rules! define_sdk {
     (
         types {
@@ -93,11 +101,39 @@ include!("src/reaction/sdk.rs");
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/reaction/sdk.rs");
-    let path =
-        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("runtime/context.d.ts");
+    for file in RUNTIME_FILES {
+        if file != "context.d.ts" {
+            println!("cargo:rerun-if-changed=runtime/{file}");
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let path = manifest_dir.join("runtime/context.d.ts");
     let declaration = generate_context_declaration();
     if fs::read_to_string(&path).ok().as_deref() != Some(&declaration) {
-        fs::write(path, declaration).expect("failed to generate runtime/context.d.ts");
+        fs::write(&path, declaration).expect("failed to generate runtime/context.d.ts");
+    }
+
+    let mut profile_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    for _ in 0..3 {
+        profile_dir.pop();
+    }
+    let runtime_dir = profile_dir.join("runtime");
+    fs::create_dir_all(&runtime_dir).expect("failed to create Cargo runtime directory");
+    for file in RUNTIME_FILES {
+        copy_if_changed(
+            &manifest_dir.join("runtime").join(file),
+            &runtime_dir.join(file),
+        );
+    }
+}
+
+fn copy_if_changed(source: &std::path::Path, destination: &std::path::Path) {
+    let contents = fs::read(source)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", source.display()));
+    if fs::read(destination).ok().as_deref() != Some(contents.as_slice()) {
+        fs::write(destination, contents)
+            .unwrap_or_else(|error| panic!("failed to write {}: {error}", destination.display()));
     }
 }
 
