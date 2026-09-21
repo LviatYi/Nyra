@@ -510,7 +510,8 @@ fn run_worker(
                         if run.run_id != run_id {
                             break Err("Script failure message run ID does not match".into());
                         }
-                        status.lock().unwrap().state = RunState::Failed(error);
+                        eprintln!("[Reaction {run_id}] {error}");
+                        status.lock().unwrap().state = RunState::ScriptFailed(error);
                         output_bytes = 0;
                     }
                     _ => {

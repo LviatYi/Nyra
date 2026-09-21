@@ -86,6 +86,7 @@ fn launch() -> Result<(), String> {
         let status = runner.status();
         match status.state {
             RunState::Completed => println!("[Reaction {}] COMPLETED", status.run_id.unwrap()),
+            RunState::ScriptFailed(_) => {}
             RunState::Failed(error) => return Err(format!("[Reaction {run_id}] {error}")),
             _ => return Err(format!("[Reaction {run_id}] Runner did not exit normally")),
         }

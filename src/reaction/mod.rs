@@ -33,6 +33,7 @@ pub enum RunState {
     Running,
     CleaningUp,
     Completed,
+    ScriptFailed(String),
     Failed(String),
 }
 
