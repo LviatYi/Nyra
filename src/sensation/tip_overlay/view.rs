@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{
     job::JobConfig,
-    sensory::job_manager::ActiveJobState,
+    sensation::job_manager::ActiveJobState,
     settings_default_values::{TIP_OVERLAY_CORNER_RADIUS, WINDOW_HEIGHT, WINDOW_WIDTH},
 };
 use bevy::{prelude::*, window::PrimaryWindow};

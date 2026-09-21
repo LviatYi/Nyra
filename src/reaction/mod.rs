@@ -5,7 +5,7 @@ mod runner;
 pub(crate) use global_hotkey::GlobalHotkeys;
 pub use runner::ReactionRunner;
 
-use crate::{job::JobConfig, sensory::ActiveJobState};
+use crate::{job::JobConfig, sensation::ActiveJobState};
 use bevy::{app::AppExit, prelude::*};
 use global_hotkey::HotkeyEvent;
 use serde::Deserialize;

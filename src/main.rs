@@ -1,6 +1,6 @@
 mod job;
 mod reaction;
-mod sensory;
+mod sensation;
 mod settings_default_values;
 
 use std::{
@@ -11,7 +11,7 @@ use std::{
 
 use crate::job::{JobConfig, Tips, is_valid_tip_color};
 use crate::reaction::{GlobalHotkeys, ReactionConfig, ReactionPlugin, ReactionRunner, RunState};
-use crate::sensory::SensoryPlugin;
+use crate::sensation::SensoryPlugin;
 use crate::settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use bevy::{
     prelude::*,

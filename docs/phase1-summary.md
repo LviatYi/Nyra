@@ -116,7 +116,7 @@ cargo build --release --locked
 
 窗口大小、17 像素字号、15 列截断阈值、边框宽度、透明度和动画时间均是代码设定，尚不是 JSON
 配置项。主要参数集中于 [settings_default_values.rs](../src/settings_default_values.rs)
-，文字参数另见 [main.rs](../src/main.rs) 和 [view.rs](../src/sensory/tip_overlay/view.rs)。
+，文字参数另见 [main.rs](../src/main.rs) 和 [view.rs](../src/sensation/tip_overlay/view.rs)。
 
 ## 4. 调度语义与示例
 
@@ -182,15 +182,15 @@ cargo build --release --locked
 | [main.rs](../src/main.rs)                                           | 命令行路径、配置读取与校验、渲染环境、窗口及应用装配 |
 | [job.rs](../src/job.rs)                                             | JSON 数据类型、默认展示时长、颜色校验和默认色板解析  |
 | [settings_default_values.rs](../src/settings_default_values.rs)     | 窗口与视觉默认常量                                   |
-| [sensory/mod.rs](../src/sensory/mod.rs)                             | `SensoryPlugin`，初始化调度资源并注册浮窗系统        |
-| [job_manager.rs](../src/sensory/job_manager.rs)                     | 调度历史、资格选择、展示结果与调度测试               |
-| [tip_overlay.rs](../src/sensory/tip_overlay.rs)                     | Startup/Update 系统注册、执行顺序与运行条件          |
-| [view.rs](../src/sensory/tip_overlay/view.rs)                       | 实体创建、文字和颜色同步、文本截断及拖动             |
-| [transition.rs](../src/sensory/tip_overlay/transition.rs)           | 提示切换时重设边框起点并启动涟漪                     |
-| [progress_border.rs](../src/sensory/tip_overlay/progress_border.rs) | 圆角边框路径缓存和剩余进度网格更新                   |
-| [ripple.rs](../src/sensory/tip_overlay/ripple.rs)                   | 涟漪状态、扩散网格与淡出更新                         |
-| [geometry.rs](../src/sensory/tip_overlay/geometry.rs)               | 圆角轮廓、三角网格及射线边界计算                     |
-| [style.rs](../src/sensory/tip_overlay/style.rs)                     | 颜色解析、背景加深、透明材质及颜色赋值               |
+| [sensory/mod.rs](../src/sensation/mod.rs)                             | `SensoryPlugin`，初始化调度资源并注册浮窗系统        |
+| [job_manager.rs](../src/sensation/job_manager.rs)                     | 调度历史、资格选择、展示结果与调度测试               |
+| [tip_overlay.rs](../src/sensation/tip_overlay.rs)                     | Startup/Update 系统注册、执行顺序与运行条件          |
+| [view.rs](../src/sensation/tip_overlay/view.rs)                       | 实体创建、文字和颜色同步、文本截断及拖动             |
+| [transition.rs](../src/sensation/tip_overlay/transition.rs)           | 提示切换时重设边框起点并启动涟漪                     |
+| [progress_border.rs](../src/sensation/tip_overlay/progress_border.rs) | 圆角边框路径缓存和剩余进度网格更新                   |
+| [ripple.rs](../src/sensation/tip_overlay/ripple.rs)                   | 涟漪状态、扩散网格与淡出更新                         |
+| [geometry.rs](../src/sensation/tip_overlay/geometry.rs)               | 圆角轮廓、三角网格及射线边界计算                     |
+| [style.rs](../src/sensation/tip_overlay/style.rs)                     | 颜色解析、背景加深、透明材质及颜色赋值               |
 
 ```mermaid
 flowchart TD
