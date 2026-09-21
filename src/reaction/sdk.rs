@@ -47,30 +47,6 @@ define_sdk! {
 
             /// Queues a grid click using one-based indices; zero aliases one and negative indices count backward from the end.
             "click_in_grid"(run_id, line; grid: UiGrid, row: i32, col: i32) {
-                let resolve_axis = |
-                    start: i32,
-                    end: i32,
-                    count: i32,
-                    index: i32,
-                    axis: &str,
-                | -> Result<i32, String> {
-                    let count = i64::from(count).abs().max(1);
-                    let position = match index.cmp(&0) {
-                        std::cmp::Ordering::Greater => i64::from(index) - 1,
-                        std::cmp::Ordering::Equal => 0,
-                        std::cmp::Ordering::Less => count + i64::from(index),
-                    };
-                    let coordinate = if count == 1 {
-                        i128::from(start)
-                    } else {
-                        i128::from(start)
-                            + (i128::from(end) - i128::from(start)) * i128::from(position)
-                                / i128::from(count - 1)
-                    };
-                    i32::try_from(coordinate).map_err(|_| {
-                        format!("Resolved grid {axis} coordinate is outside the supported range")
-                    })
-                };
                 let grid = &grid;
                 let point = ScreenPoint {
                     x: resolve_axis(
@@ -78,14 +54,12 @@ define_sdk! {
                         grid.right_bottom.x,
                         grid.col_count,
                         col,
-                        "x",
                     )?,
                     y: resolve_axis(
                         grid.left_top.y,
                         grid.right_bottom.y,
                         grid.row_count,
                         row,
-                        "y",
                     )?,
                 };
 
@@ -106,4 +80,32 @@ define_sdk! {
             }
         }
     }
+}
+
+/// Split and solve a point on the axis
+///
+/// Out-of-bounds operations are allowed.
+/// When the index is 0, it is treated as 1. If it is negative, the calculation is reversed.
+fn resolve_axis(
+    start: i32,
+    end: i32,
+    count: i32,
+    index: i32,
+) -> Result<i32, String> {
+    if start == end { return Ok(start); };
+
+    let count = count.abs().max(1);
+    let position = match index.cmp(&0) {
+        std::cmp::Ordering::Greater => index - 1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Less => index,
+    };
+    let coordinate = if count == 1 {
+        i64::from(start)
+    } else {
+        i64::from(start)
+            + (i64::from(end) - i64::from(start)) * i64::from(position)
+            / i64::from(count - 1)
+    };
+    i32::try_from(coordinate).map_err(|_| "Resolved grid coordinate is outside the supported range".into())
 }
