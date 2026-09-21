@@ -30,9 +30,9 @@ UI 或配置字段解决。
 |--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------|
 | 应用装配     | [main.rs](../src/main.rs) 读取 JSON，创建透明置顶窗口并注册 Sensory                                                                                     | 装配配置、捕获、识别、快捷键和宏执行；统一退出清理                          |
 | 配置         | [job.rs](../src/job.rs) 只有 `Tips`、`Tip` 和 `JobConfig`；启动时要求 tips 非空                                                                         | 引入顶层应用配置、条件与宏的关联，允许只有条件方案的配置                    |
-| 定时调度     | [job_manager.rs](../src/sensory/job_manager.rs) 按 `interval/showTime` 轮换，通过 `ActiveJobState` 输出数组索引                                         | 保留原有调度；增加一个选择最终展示内容的入口，避免将识别条件硬塞进时间间隔  |
-| 浮窗呈现     | [view.rs](../src/sensory/tip_overlay/view.rs) 按提示索引获取文字和颜色                                                                                  | 消费统一展示数据；显示方案、可执行状态、确认键和结果                        |
-| 动画和刷新   | [tip_overlay.rs](../src/sensory/tip_overlay.rs) 按资源变化同步 UI；[transition.rs](../src/sensory/tip_overlay/transition.rs) 按提示索引决定是否播放动画 | 改用展示身份和状态；同一方案再次达成也能提醒，采样更新不反复播放动画        |
+| 定时调度     | [job_manager.rs](../src/sensation/job_manager.rs) 按 `interval/showTime` 轮换，通过 `ActiveJobState` 输出数组索引                                         | 保留原有调度；增加一个选择最终展示内容的入口，避免将识别条件硬塞进时间间隔  |
+| 浮窗呈现     | [view.rs](../src/sensation/tip_overlay/view.rs) 按提示索引获取文字和颜色                                                                                  | 消费统一展示数据；显示方案、可执行状态、确认键和结果                        |
+| 动画和刷新   | [tip_overlay.rs](../src/sensation/tip_overlay.rs) 按资源变化同步 UI；[transition.rs](../src/sensation/tip_overlay/transition.rs) 按提示索引决定是否播放动画 | 改用展示身份和状态；同一方案再次达成也能提醒，采样更新不反复播放动画        |
 | 初始化与清空 | `setup_overlay` 直接取 `tips[0]`，且使用列表长度取模；文字同步遇到空状态直接返回                                                                        | 消除空列表索引/取模；无方案时主动清空或展示空闲信息，不能保留旧的可执行提示 |
 | 输入与识别   | [Cargo.toml](../Cargo.toml) 尚无专门的屏幕捕获、识别和系统输入依赖                                                                                      | 新增 Windows 适配及小范围图像处理，具体依赖在兼容性验证后确定               |
 

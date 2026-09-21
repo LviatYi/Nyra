@@ -3,7 +3,11 @@
     {
       "tip": "S-T TIP 1",
       "interval": 8,
-      "showTime": 8
+      "showTime": 8,
+      "reaction": {
+        "hotkey": "Ctrl+Alt+R",
+        "script": "examples/reaction.ts"
+      }
     },
     {
       "tip": "SHOW 6 TIP 2",
