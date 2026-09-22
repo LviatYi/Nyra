@@ -1,4 +1,5 @@
 mod job;
+mod perception;
 mod reaction;
 mod sensation;
 mod settings_default_values;
@@ -36,7 +37,7 @@ fn main() -> ExitCode {
         .any(|arg| arg == "--help" || arg == "-h")
     {
         println!(
-            "Usage: nyra.exe [config.json] [--run-script script.ts]\nScript paths are resolved relative to the configuration file directory; --run-script only executes the script without launching the floating window."
+            "Usage:\n  nyra.exe [config.json] [--run-script script.ts]\n  nyra.exe --perception-record condition.json\n  nyra.exe --perception-watch condition.json\n\nScript paths are resolved relative to the configuration file directory. Perception record/watch currently operate on one region of the primary monitor."
         );
         return ExitCode::SUCCESS;
     }
@@ -52,7 +53,24 @@ fn main() -> ExitCode {
 fn launch() -> Result<(), String> {
     configure_dpi_awareness()?;
 
-    let mut args = env::args_os().skip(1);
+    let raw_args = env::args_os().skip(1).collect::<Vec<_>>();
+    if let Some(command) = raw_args.first().and_then(|arg| arg.to_str()) {
+        match command {
+            "--perception-record" if raw_args.len() == 2 => {
+                configure_render_environment();
+                return perception::record_condition(Path::new(&raw_args[1]));
+            }
+            "--perception-watch" if raw_args.len() == 2 => {
+                return perception::watch_condition(Path::new(&raw_args[1]));
+            }
+            "--perception-record" | "--perception-watch" => {
+                return Err(format!("{command} requires exactly one condition JSON path"));
+            }
+            _ => {}
+        }
+    }
+
+    let mut args = raw_args.into_iter();
     let mut config_path = None;
     let mut script = None;
     while let Some(arg) = args.next() {
