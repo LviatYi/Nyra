@@ -22,7 +22,7 @@ pub(super) struct CountdownBorder {
     topology: VisibleBorderTopology,
 }
 
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub(super) struct CountdownBorderShade;
 
 #[derive(Resource)]
@@ -58,6 +58,7 @@ struct BorderSample {
 }
 
 /// One cached lap of the border, rebased so that progress `0.0` is the ripple origin.
+#[derive(Clone)]
 pub(super) struct ProgressBorderPath {
     start_progress: f32,
     samples: Vec<BorderPathSample>,

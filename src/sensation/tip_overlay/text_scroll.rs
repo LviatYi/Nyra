@@ -6,10 +6,10 @@ use crate::settings_default_values::{
 };
 use bevy::prelude::*;
 
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub(super) struct TipTextViewport;
 
-#[derive(Component, Default)]
+#[derive(Component, Default, Clone)]
 pub(super) struct TextScroll {
     elapsed: f32,
     distance: f32,
