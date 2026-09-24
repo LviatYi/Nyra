@@ -1,7 +1,7 @@
 use super::{
     progress_border::{CountdownBorder, ProgressBorderGeometry},
     ripple::Ripple,
-    style::{set_material_color, tip_color},
+    style::{OverlayMaterial, set_material_color, tip_color},
 };
 use crate::{job::JobConfig, sensation::job_manager::ActiveJobState};
 use bevy::prelude::*;
@@ -12,9 +12,9 @@ pub(super) fn begin_tip_transition(
     state: Res<ActiveJobState>,
     geometry: Res<ProgressBorderGeometry>,
     border: Single<(&mut CountdownBorder, &Mesh2d)>,
-    ripple: Single<(&mut Ripple, &MeshMaterial2d<ColorMaterial>)>,
+    ripple: Single<(&mut Ripple, &MeshMaterial2d<OverlayMaterial>)>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut materials: ResMut<Assets<OverlayMaterial>>,
 ) {
     let Some(active_job) = state.active_job.as_ref() else {
         return;

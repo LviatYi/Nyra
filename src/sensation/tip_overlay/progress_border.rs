@@ -1,6 +1,6 @@
 use super::{
     geometry::{OutlinePoint, rounded_rectangle_outline, triangle_mesh},
-    style::set_material_color,
+    style::{OverlayMaterial, set_material_color},
 };
 use crate::{
     sensation::job_manager::ActiveJobState,
@@ -276,9 +276,9 @@ pub(super) fn update_countdown_border(
     time: Res<Time<Real>>,
     state: Res<ActiveJobState>,
     border: Single<(&mut CountdownBorder, &Mesh2d)>,
-    shade: Single<&MeshMaterial2d<ColorMaterial>, With<CountdownBorderShade>>,
+    shade: Single<&MeshMaterial2d<OverlayMaterial>, With<CountdownBorderShade>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut materials: ResMut<Assets<OverlayMaterial>>,
 ) {
     let Some(active_job) = state.active_job.as_ref() else {
         return;
@@ -359,9 +359,9 @@ fn update_progress_border_mesh(
 }
 
 fn border_vertex_pair(point: OutlinePoint) -> BorderVertexPair {
-    let offset = point.outward * (TIP_OVERLAY_BORDER_WIDTH / 2.0);
-    let outer = point.position + offset;
-    let inner = point.position - offset;
+    let inner = point.position - point.outward * (TIP_OVERLAY_BORDER_WIDTH / 2.0);
+    // Overscan the outer edge; the material owns the exact rounded boundary.
+    let outer = point.position + point.outward * TIP_OVERLAY_BORDER_WIDTH;
     BorderVertexPair {
         outer: [outer.x, outer.y, 0.0],
         inner: [inner.x, inner.y, 0.0],

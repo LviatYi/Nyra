@@ -9,15 +9,17 @@ mod view;
 use self::{
     progress_border::update_countdown_border,
     ripple::animate_ripple,
+    style::OverlayMaterial,
     text_scroll::animate_tip_text,
     transition::begin_tip_transition,
     view::{drag_overlay, setup_overlay, sync_tip_colors, sync_tip_text},
 };
 use super::job_manager::{ActiveJobState, process_jobs};
-use bevy::prelude::*;
+use bevy::{prelude::*, sprite_render::Material2dPlugin};
 
 pub(super) fn configure(app: &mut App) {
-    app.add_systems(Startup, setup_overlay)
+    app.add_plugins(Material2dPlugin::<OverlayMaterial>::default())
+        .add_systems(Startup, setup_overlay)
         .add_systems(
             Update,
             (

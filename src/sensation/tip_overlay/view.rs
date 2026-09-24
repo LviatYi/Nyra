@@ -1,19 +1,19 @@
 use super::{
-    geometry::rounded_rectangle_mesh,
     progress_border::{
         CountdownBorder, CountdownBorderShade, ProgressBorderGeometry, ProgressBorderPath,
         progress_border_mesh,
     },
     ripple::{Ripple, ripple_mesh},
     style::{
-        color_with_alpha, overlay_material, set_material_color, tip_background_color, tip_color,
+        OverlayMaterial, color_with_alpha, overlay_material, set_material_color,
+        tip_background_color, tip_color,
     },
     text_scroll::{TextScroll, TipTextViewport},
 };
 use crate::{
     job::JobConfig,
     sensation::job_manager::ActiveJobState,
-    settings_default_values::{TIP_OVERLAY_CORNER_RADIUS, WINDOW_HEIGHT, WINDOW_WIDTH},
+    settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH},
 };
 use bevy::{prelude::*, text::FontSourceTemplate, window::PrimaryWindow};
 
@@ -33,29 +33,28 @@ pub(super) struct PlayedBorder;
 
 struct OverlaySceneAssets {
     background_mesh: Handle<Mesh>,
-    background_material: Handle<ColorMaterial>,
+    background_material: Handle<OverlayMaterial>,
     ripple_mesh: Handle<Mesh>,
-    ripple_material: Handle<ColorMaterial>,
+    ripple_material: Handle<OverlayMaterial>,
     played_mesh: Handle<Mesh>,
-    played_material: Handle<ColorMaterial>,
+    played_material: Handle<OverlayMaterial>,
     countdown_mesh: Handle<Mesh>,
-    countdown_material: Handle<ColorMaterial>,
-    shade_material: Handle<ColorMaterial>,
+    countdown_material: Handle<OverlayMaterial>,
+    shade_material: Handle<OverlayMaterial>,
 }
 
 pub(super) fn setup_overlay(
     mut commands: Commands,
     tips: Res<JobConfig>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    mut materials: ResMut<Assets<OverlayMaterial>>,
 ) {
     let current_color = tip_color(&tips, 0);
     let next_index = 1 % tips.0.tips.len();
     let next_color = tip_color(&tips, next_index);
     let size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32);
-    let background_material =
-        materials.add(ColorMaterial::from(tip_background_color(current_color)));
-    let background_mesh = meshes.add(rounded_rectangle_mesh(size, TIP_OVERLAY_CORNER_RADIUS));
+    let background_material = materials.add(overlay_material(tip_background_color(current_color)));
+    let background_mesh = meshes.add(Rectangle::new(size.x, size.y));
 
     let ripple = Ripple::new(0);
     let ripple_mesh = meshes.add(ripple_mesh(&ripple));
@@ -105,35 +104,35 @@ fn overlay_scene(
         Camera2d,
         (
             Mesh2d(background_mesh)
-            MeshMaterial2d::<ColorMaterial>(background_material)
+            MeshMaterial2d::<OverlayMaterial>(background_material)
             Transform::from_xyz(0.0, 0.0, 0.0)
             TipBackground
             TipOverlay
         ),
         (
             Mesh2d(ripple_mesh)
-            MeshMaterial2d::<ColorMaterial>(ripple_material)
+            MeshMaterial2d::<OverlayMaterial>(ripple_material)
             Transform::from_xyz(0.0, 0.0, 0.5)
             template(|_| Ok(Ripple::new(0)))
             TipOverlay
         ),
         (
             Mesh2d(played_mesh)
-            MeshMaterial2d::<ColorMaterial>(played_material)
+            MeshMaterial2d::<OverlayMaterial>(played_material)
             Transform::from_xyz(0.0, 0.0, 1.0)
             PlayedBorder
             TipOverlay
         ),
         (
             Mesh2d(countdown_mesh)
-            MeshMaterial2d::<ColorMaterial>(countdown_material)
+            MeshMaterial2d::<OverlayMaterial>(countdown_material)
             Transform::from_xyz(0.0, 0.0, 2.0)
             template(move |_| Ok(CountdownBorder::new(countdown_path.clone())))
             TipOverlay
         ),
         (
             Mesh2d(shade_mesh)
-            MeshMaterial2d::<ColorMaterial>(shade_material)
+            MeshMaterial2d::<OverlayMaterial>(shade_material)
             Transform::from_xyz(0.0, 0.0, 2.1)
             CountdownBorderShade
             TipOverlay
@@ -198,9 +197,9 @@ pub(super) fn sync_tip_text(
 pub(super) fn sync_tip_colors(
     jobs: Res<JobConfig>,
     state: Res<ActiveJobState>,
-    played: Single<&MeshMaterial2d<ColorMaterial>, With<PlayedBorder>>,
-    countdown: Single<&MeshMaterial2d<ColorMaterial>, With<CountdownBorder>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    played: Single<&MeshMaterial2d<OverlayMaterial>, With<PlayedBorder>>,
+    countdown: Single<&MeshMaterial2d<OverlayMaterial>, With<CountdownBorder>>,
+    mut materials: ResMut<Assets<OverlayMaterial>>,
 ) {
     let Some(active_job) = state.active_job.as_ref() else {
         return;
