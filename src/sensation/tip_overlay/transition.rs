@@ -21,9 +21,6 @@ pub(super) fn begin_tip_transition(
     };
 
     let (mut ripple, ripple_material) = ripple.into_inner();
-    if active_job.current_index == ripple.displayed_tip_index() {
-        return;
-    }
 
     let current_color = tip_color(&jobs, active_job.current_index);
     let (mut border, border_mesh) = border.into_inner();
