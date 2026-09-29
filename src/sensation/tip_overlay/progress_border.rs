@@ -115,29 +115,30 @@ impl CountdownBorder {
 impl ProgressBorderGeometry {
     pub(super) fn new() -> Self {
         let half_size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32) / 2.0;
-        let centerline_radius = TIP_OVERLAY_CORNER_RADIUS - TIP_OVERLAY_BORDER_WIDTH / 2.0;
-        let centerline = rounded_rectangle_outline(
-            half_size - Vec2::splat(TIP_OVERLAY_BORDER_WIDTH / 2.0),
-            centerline_radius,
+        let inner_outline = rounded_rectangle_outline(
+            half_size - Vec2::splat(TIP_OVERLAY_BORDER_WIDTH),
+            TIP_OVERLAY_CORNER_RADIUS - TIP_OVERLAY_BORDER_WIDTH,
         );
+        let outer_half_size = half_size + Vec2::splat(TIP_OVERLAY_BORDER_WIDTH / 2.0);
 
-        let total_length = centerline
+        let total_length = inner_outline
             .windows(2)
-            .map(|points| points[0].position.distance(points[1].position))
+            .map(|points| border_center(points[0]).distance(border_center(points[1])))
             .sum::<f32>();
         let mut traversed = 0.0;
-        let mut samples = Vec::with_capacity(centerline.len());
+        let mut samples = Vec::with_capacity(inner_outline.len());
         samples.push(BorderSample {
             progress: 0.0,
-            center: centerline[0].position,
-            vertices: border_vertex_pair(centerline[0]),
+            center: border_center(inner_outline[0]),
+            vertices: border_vertex_pair(inner_outline[0], outer_half_size),
         });
-        for points in centerline.windows(2) {
-            traversed += points[0].position.distance(points[1].position);
+        for points in inner_outline.windows(2) {
+            let center = border_center(points[1]);
+            traversed += border_center(points[0]).distance(center);
             samples.push(BorderSample {
                 progress: (traversed / total_length).min(1.0),
-                center: points[1].position,
-                vertices: border_vertex_pair(points[1]),
+                center,
+                vertices: border_vertex_pair(points[1], outer_half_size),
             });
         }
         samples.last_mut().unwrap().progress = 1.0;
@@ -358,13 +359,28 @@ fn update_progress_border_mesh(
     }
 }
 
-fn border_vertex_pair(point: OutlinePoint) -> BorderVertexPair {
-    let inner = point.position - point.outward * (TIP_OVERLAY_BORDER_WIDTH / 2.0);
-    // Overscan the outer edge; the material owns the exact rounded boundary.
-    let outer = point.position + point.outward * TIP_OVERLAY_BORDER_WIDTH;
+fn border_center(inner: OutlinePoint) -> Vec2 {
+    inner.position + inner.outward * (TIP_OVERLAY_BORDER_WIDTH / 2.0)
+}
+
+fn border_vertex_pair(inner: OutlinePoint, outer_half_size: Vec2) -> BorderVertexPair {
+    // The final mask owns the outer rounded boundary. Extend each inner-outline
+    // sample to a rectangular envelope so this mesh only tessellates the inner curve.
+    let distance_to_vertical_edge = if inner.outward.x == 0.0 {
+        f32::INFINITY
+    } else {
+        (outer_half_size.x - inner.position.x.abs()) / inner.outward.x.abs()
+    };
+    let distance_to_horizontal_edge = if inner.outward.y == 0.0 {
+        f32::INFINITY
+    } else {
+        (outer_half_size.y - inner.position.y.abs()) / inner.outward.y.abs()
+    };
+    let outer = inner.position
+        + inner.outward * distance_to_vertical_edge.min(distance_to_horizontal_edge);
     BorderVertexPair {
         outer: [outer.x, outer.y, 0.0],
-        inner: [inner.x, inner.y, 0.0],
+        inner: [inner.position.x, inner.position.y, 0.0],
     }
 }
 
