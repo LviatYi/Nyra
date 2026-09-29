@@ -1,6 +1,6 @@
 use super::{
     geometry::triangle_mesh,
-    style::{OverlayMaterial, color_with_alpha, set_material_color, tip_background_color},
+    style::{color_with_alpha, set_material_color, tip_background_color},
     view::TipBackground,
 };
 use crate::settings_default_values::{
@@ -93,10 +93,10 @@ pub(super) fn ripple_mesh(ripple: &Ripple) -> Mesh {
 
 pub(super) fn animate_ripple(
     time: Res<Time<Real>>,
-    ripple: Single<(&mut Ripple, &Mesh2d, &MeshMaterial2d<OverlayMaterial>)>,
-    background: Single<&MeshMaterial2d<OverlayMaterial>, With<TipBackground>>,
+    ripple: Single<(&mut Ripple, &Mesh2d, &MeshMaterial2d<ColorMaterial>)>,
+    background: Single<&MeshMaterial2d<ColorMaterial>, With<TipBackground>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<OverlayMaterial>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     let now = time.elapsed();
     let (mut ripple, ripple_mesh, ripple_material) = ripple.into_inner();

@@ -1,6 +1,6 @@
 use super::{
     geometry::{OutlinePoint, rounded_rectangle_outline, triangle_mesh},
-    style::{OverlayMaterial, set_material_color},
+    style::set_material_color,
 };
 use crate::{
     sensation::job_manager::ActiveJobState,
@@ -276,9 +276,9 @@ pub(super) fn update_countdown_border(
     time: Res<Time<Real>>,
     state: Res<ActiveJobState>,
     border: Single<(&mut CountdownBorder, &Mesh2d)>,
-    shade: Single<&MeshMaterial2d<OverlayMaterial>, With<CountdownBorderShade>>,
+    shade: Single<&MeshMaterial2d<ColorMaterial>, With<CountdownBorderShade>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<OverlayMaterial>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     let Some(active_job) = state.active_job.as_ref() else {
         return;
