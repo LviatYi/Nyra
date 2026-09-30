@@ -12,7 +12,8 @@ use std::{
 };
 
 use crate::controller::ControllerPlugin;
-use crate::job::{JobConfig, Tips, is_valid_tip_color};
+use crate::job::{Job, JobConfig, Jobs, is_valid_tip_color};
+use crate::perception::PerceptionObserver;
 use crate::reaction::{GlobalHotkeys, ReactionConfig, ReactionPlugin, ReactionRunner, RunState};
 use crate::sensation::SensoryPlugin;
 use crate::settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH};
@@ -28,7 +29,7 @@ use bevy::{
 #[derive(serde::Deserialize)]
 struct AppConfig {
     #[serde(flatten)]
-    tips: Tips,
+    jobs: Jobs,
     #[serde(default)]
     reaction: ReactionConfig,
 }
@@ -111,12 +112,13 @@ fn launch() -> Result<(), String> {
             _ => return Err(format!("[Reaction {run_id}] Runner did not exit normally")),
         }
     } else {
+        let observer = PerceptionObserver::new(&config.jobs, &config_path)?;
         let scripts = config
-            .tips
-            .tips
+            .jobs
+            .jobs
             .iter()
-            .filter_map(|tip| {
-                tip.reaction
+            .filter_map(|job| {
+                job.tip().reaction
                     .as_ref()
                     .map(|reaction| reaction.script.clone())
             })
@@ -124,7 +126,7 @@ fn launch() -> Result<(), String> {
         let runner = ReactionRunner::new(&config.reaction, &config_path, scripts)?;
         let hotkeys = GlobalHotkeys::new()?;
         configure_render_environment();
-        run(config.tips, runner, hotkeys);
+        run(config.jobs, runner, hotkeys, observer);
     }
     Ok(())
 }
@@ -190,40 +192,56 @@ fn load_config(path: &Path) -> Result<AppConfig, String> {
             path.display()
         )
     })?;
-    validate_config(&config.tips)?;
+    validate_config(&config.jobs)?;
     Ok(config)
 }
 
-fn validate_config(config: &Tips) -> Result<(), String> {
-    if config.tips.is_empty() {
-        return Err("Tips in the configuration cannot be empty".into());
+fn validate_config(config: &Jobs) -> Result<(), String> {
+    if config.jobs.is_empty() {
+        return Err("Jobs in the configuration cannot be empty".into());
     }
 
-    for (index, tip) in config.tips.iter().enumerate() {
-        let name = format!("tips[{index}]");
-        if tip.tip.trim().is_empty() {
-            return Err(format!("{name}.tip cannot be empty"));
+    for (index, job) in config.jobs.iter().enumerate() {
+        let name = format!("jobs[{index}]");
+        let tip = job.tip();
+        if tip.text.trim().is_empty() {
+            return Err(format!("{name}.tip.text cannot be empty"));
         }
-        if tip.interval <= 0 {
-            return Err(format!("{name}.interval must be greater than 0"));
-        }
-        if let Some(show_time) = tip.show_time
-            && show_time <= 0
-        {
-            return Err(format!("{name}.showTime must be greater than 0"));
+        match job {
+            Job::Interval { interval, show_time, .. } => {
+                if *interval == 0 {
+                    return Err(format!("{name}.interval must be greater than 0"));
+                }
+                if show_time.is_some_and(|show_time| show_time == 0) {
+                    return Err(format!("{name}.showTime must be greater than 0"));
+                }
+            }
+            Job::ImagePerception { image: condition, .. } if condition.as_os_str().is_empty() => {
+                return Err(format!("{name}.condition cannot be empty"));
+            }
+            Job::ImagePerception { .. } => {}
         }
         if let Some(color) = tip.color.as_deref()
             && !is_valid_tip_color(color)
         {
-            return Err(format!("{name}.color must use format like #RRGGBB"));
+            return Err(format!("{name}.tip.color must use format like #RRGGBB"));
         }
     }
 
     Ok(())
 }
 
-fn run(config: Tips, runner: ReactionRunner, hotkeys: GlobalHotkeys) {
-    App::new()
+fn run(
+    config: Jobs,
+    runner: ReactionRunner,
+    hotkeys: GlobalHotkeys,
+    observer: Option<PerceptionObserver>,
+) {
+    let mut app = App::new();
+    if let Some(observer) = observer {
+        app.insert_resource(observer);
+    }
+    app
         .insert_resource(ClearColor(Color::NONE))
         .insert_resource(JobConfig(config))
         .insert_resource(runner)

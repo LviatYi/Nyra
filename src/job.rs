@@ -4,22 +4,40 @@ use bevy::prelude::Resource;
 use serde::{Deserialize, Deserializer, de};
 
 /// Seconds.
-pub type TipTick = u64;
+pub type JobTick = u64;
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct Tip {
-    pub tip: String,
-    pub interval: TipTick,
-    pub show_time: Option<TipTick>,
+    pub text: String,
     pub color: Option<String>,
     pub reaction: Option<TipReaction>,
 }
 
-impl Tip {
-    pub fn show_time(&self) -> TipTick {
-        self.show_time
-            .unwrap_or(crate::settings_default_values::DEFAULT_TIP_SHOW_TIME)
+#[derive(Debug, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum Job {
+    Interval {
+        tip: Tip,
+        interval: JobTick,
+        show_time: Option<JobTick>,
+    },
+    ImagePerception {
+        tip: Tip,
+        image: PathBuf,
+    },
+}
+
+impl Job {
+    pub fn tip(&self) -> &Tip {
+        match self {
+            Self::Interval { tip, .. } | Self::ImagePerception { tip, .. } => tip,
+        }
     }
 }
 
@@ -137,23 +155,23 @@ pub fn is_valid_tip_color(color: &str) -> bool {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Tips {
-    pub tips: Vec<Tip>,
+pub struct Jobs {
+    pub jobs: Vec<Job>,
 }
 
 #[derive(Resource)]
-pub struct JobConfig(pub Tips);
+pub struct JobConfig(pub Jobs);
 
 impl JobConfig {
     pub fn is_empty(&self) -> bool {
-        self.0.tips.is_empty()
+        self.0.jobs.is_empty()
     }
 
-    /// Returns the configured color or the palette color assigned to this tip position.
-    pub fn resolved_color_at(&self, tip_index: usize) -> &str {
-        self.0.tips[tip_index].color.as_deref().unwrap_or_else(|| {
+    /// Returns the configured color or the palette color assigned to this job position.
+    pub fn resolved_color_at(&self, job_index: usize) -> &str {
+        self.0.jobs[job_index].tip().color.as_deref().unwrap_or_else(|| {
             let colors = crate::settings_default_values::DEFAULT_TIP_COLORS;
-            colors[tip_index % colors.len()]
+            colors[job_index % colors.len()]
         })
     }
 }

@@ -1,4 +1,7 @@
-use crate::job::JobConfig;
+use crate::{
+    job::{Job, JobConfig},
+    perception::PerceptionObserver,
+};
 use bevy::prelude::*;
 use rand::RngExt;
 use std::time::Duration;
@@ -8,7 +11,7 @@ pub(crate) struct ActiveJob {
     pub(crate) preview_next_index: usize,
     pub(crate) anim_ripple_rng_at: f32,
     pub(crate) started_at: Duration,
-    ends_at: Duration,
+    ends_at: Option<Duration>,
 }
 
 impl ActiveJob {
@@ -17,7 +20,10 @@ impl ActiveJob {
     }
 
     pub(crate) fn remaining_fraction_at(&self, now: Duration) -> f32 {
-        let duration = self.ends_at.saturating_sub(self.started_at).as_secs_f32();
+        let Some(ends_at) = self.ends_at else {
+            return 1.0;
+        };
+        let duration = ends_at.saturating_sub(self.started_at).as_secs_f32();
         if duration == 0.0 {
             return 0.0;
         }
@@ -70,6 +76,7 @@ impl JobRuntimeState {
 #[derive(Resource, Default)]
 pub(super) struct JobManager {
     jobs: Vec<JobRuntimeState>,
+    last_conflict: Vec<usize>,
 }
 
 impl JobManager {
@@ -77,9 +84,10 @@ impl JobManager {
         &mut self,
         config: &JobConfig,
         state: &ActiveJobState,
+        matched_jobs: &[usize],
         now: Duration,
     ) -> JobUpdate {
-        self.synchronize_job_count(config.0.tips.len());
+        self.synchronize_job_count(config.0.jobs.len());
         if config.is_empty() {
             return if state.active_job.is_some() {
                 JobUpdate::Replace(None)
@@ -88,11 +96,34 @@ impl JobManager {
             };
         }
 
+        if let [index] = matched_jobs {
+            if state.current_index() == Some(*index) {
+                return JobUpdate::Unchanged;
+            }
+            let last_start = state.active_job.as_ref().map(|job| job.anim_ripple_rng_at);
+            return JobUpdate::Replace(Some(self.create_job(config, *index, now, last_start)));
+        }
+
+        if state.active_job.as_ref().is_some_and(|job| {
+            matches!(&config.0.jobs[job.current_index], Job::ImagePerception { .. })
+        }) {
+            let last_start = state.active_job.as_ref().map(|job| job.anim_ripple_rng_at);
+            let next = self.select_next(config, now, None)
+                .map(|index| self.create_job(config, index, now, last_start));
+            return JobUpdate::Replace(next);
+        }
+
         let Some(active_job) = state.active_job.as_ref() else {
-            let next_index = self.select_next(config, now, None).unwrap();
-            return JobUpdate::Replace(Some(self.create_job(config, next_index, now, None)));
+            let next = self
+                .select_next(config, now, None)
+                .map(|index| self.create_job(config, index, now, None));
+            return if next.is_some() {
+                JobUpdate::Replace(next)
+            } else {
+                JobUpdate::Unchanged
+            };
         };
-        if now < active_job.ends_at {
+        if active_job.ends_at.is_some_and(|ends_at| now < ends_at) {
             return JobUpdate::Unchanged;
         }
 
@@ -100,15 +131,10 @@ impl JobManager {
         // interval starts after presentation completes; the job's own showTime does
         // not consume its next interval.
         self.jobs[completed_index].finished_at = Some(now);
-        let next_index = self
-            .select_next(config, now, Some(completed_index))
-            .unwrap();
-        JobUpdate::Replace(Some(self.create_job(
-            config,
-            next_index,
-            now,
-            Some(active_job.anim_ripple_rng_at),
-        )))
+        let next = self.select_next(config, now, Some(completed_index)).map(|index| {
+            self.create_job(config, index, now, Some(active_job.anim_ripple_rng_at))
+        });
+        JobUpdate::Replace(next)
     }
 
     fn create_job(
@@ -118,12 +144,15 @@ impl JobManager {
         now: Duration,
         last_anim_ripple_rng_at: Option<f32>,
     ) -> ActiveJob {
-        let duration = Duration::from_secs(config.0.tips[index].show_time());
-        let ends_at = now.saturating_add(duration);
+        let ends_at = match &config.0.jobs[index] {
+            Job::Interval { show_time, .. } => Some(now.saturating_add(Duration::from_secs(
+                show_time.unwrap_or(crate::settings_default_values::DEFAULT_TIP_SHOW_TIME),
+            ))),
+            Job::ImagePerception { .. } => None,
+        };
         let preview_next_index = self
-            .select_next(config, ends_at, Some(index))
-            // A non-empty config always falls back to the selected job.
-            .unwrap();
+            .select_next(config, ends_at.unwrap_or(now), Some(index))
+            .unwrap_or(index);
         let mut rng = rand::rng();
         let requested_start = match last_anim_ripple_rng_at {
             // Keep both directions around the closed border at least a quarter lap apart.
@@ -147,28 +176,33 @@ impl JobManager {
     ) -> Option<usize> {
         config
             .0
-            .tips
+            .jobs
             .iter()
             .enumerate()
             // Do not repeat the current job while another job is eligible.
-            .filter(|(index, _)| Some(*index) != completed_index)
-            .filter(|(index, job)| {
-                self.jobs[*index].is_eligible_at(now, Duration::from_secs(job.interval))
+            .filter_map(|(index, job)| match job {
+                Job::Interval { interval, .. } if Some(index) != completed_index => {
+                    Some((index, *interval))
+                }
+                _ => None,
+            })
+            .filter(|(index, interval)| {
+                self.jobs[*index].is_eligible_at(now, Duration::from_secs(*interval))
             })
             // Prefer the job that has been eligible for the longest time. A job
             // that has never completed is treated as eligible since startup, so
             // every initial job is selected before recurring jobs can starve it.
             // Interval and configuration order provide deterministic tie-breaks.
-            .min_by_key(|(index, job)| {
+            .min_by_key(|(index, interval)| {
                 (
-                    self.jobs[*index].eligible_at(Duration::from_secs(job.interval)),
-                    job.interval,
+                    self.jobs[*index].eligible_at(Duration::from_secs(*interval)),
+                    *interval,
                     *index,
                 )
             })
             .map(|(index, _)| index)
             // Continuous display is preferred to waiting when every alternative is blocked.
-            .or(completed_index.filter(|index| *index < config.0.tips.len()))
+            .or(completed_index.filter(|index| *index < config.0.jobs.len()))
     }
 
     fn synchronize_job_count(&mut self, job_count: usize) {
@@ -179,10 +213,22 @@ impl JobManager {
 pub(super) fn process_jobs(
     time: Res<Time<Real>>,
     config: Res<JobConfig>,
+    observer: Option<Res<PerceptionObserver>>,
     mut manager: ResMut<JobManager>,
     mut state: ResMut<ActiveJobState>,
 ) {
-    let update = manager.eval_update_at(&config, &state, time.elapsed());
+    let matched_jobs = observer
+        .map(|observer| observer.matched_job_indexes())
+        .unwrap_or_default();
+    if matched_jobs.len() > 1 && manager.last_conflict != matched_jobs {
+        eprintln!("[Perception] Multiple jobs match simultaneously: {matched_jobs:?}");
+    }
+    manager.last_conflict = if matched_jobs.len() > 1 {
+        matched_jobs.clone()
+    } else {
+        Vec::new()
+    };
+    let update = manager.eval_update_at(&config, &state, &matched_jobs, time.elapsed());
     if let JobUpdate::Replace(next) = update {
         state.active_job = next;
     }
@@ -191,7 +237,7 @@ pub(super) fn process_jobs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::job::{Tip, Tips};
+    use crate::job::{Job, Jobs, Tip};
 
     #[test]
     fn schedules_by_earliest_eligibility() {
@@ -250,7 +296,7 @@ mod tests {
                 schedule.run(&mut world);
             }
 
-            world.resource_mut::<JobConfig>().0.tips.clear();
+            world.resource_mut::<JobConfig>().0.jobs.clear();
             schedule.run(&mut world);
             schedule.run(&mut world);
 
@@ -282,19 +328,21 @@ mod tests {
 
     impl TestScheduler {
         fn new(job_times: &[(u64, u64)]) -> Self {
-            let tips = job_times
+            let jobs = job_times
                 .iter()
                 .enumerate()
-                .map(|(index, &(interval, show_time))| Tip {
-                    tip: format!("job {index}"),
+                .map(|(index, &(interval, show_time))| Job::Interval {
+                    tip: Tip {
+                        text: format!("job {index}"),
+                        color: None,
+                        reaction: None,
+                    },
                     interval,
                     show_time: Some(show_time),
-                    color: None,
-                    reaction: None,
                 })
                 .collect();
             Self {
-                config: JobConfig(Tips { tips }),
+                config: JobConfig(Jobs { jobs }),
                 manager: JobManager::default(),
                 state: ActiveJobState::default(),
             }
@@ -304,6 +352,7 @@ mod tests {
             match self.manager.eval_update_at(
                 &self.config,
                 &self.state,
+                &[],
                 Duration::from_secs(seconds),
             ) {
                 JobUpdate::Unchanged => false,

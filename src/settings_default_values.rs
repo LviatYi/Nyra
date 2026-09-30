@@ -1,6 +1,6 @@
 // some default values will be moved to the settings in the future.
 
-use crate::job::TipTick;
+use crate::job::JobTick;
 use std::time::Duration;
 
 //region Windows
@@ -9,7 +9,7 @@ pub const WINDOW_HEIGHT: u32 = 40;
 //endregion
 
 //region UI
-pub const DEFAULT_TIP_SHOW_TIME: TipTick = 5u64;
+pub const DEFAULT_TIP_SHOW_TIME: JobTick = 5u64;
 pub const DEFAULT_TIP_COLORS: &[&str] = &[
     "#33E078", "#4DA3FF", "#A879FF", "#FFB347", "#FF6685", "#37D6D0",
 ];

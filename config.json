@@ -1,21 +1,26 @@
 {
-  "tips": [
+  "jobs": [
     {
-      "tip": "S-T TIP 1",
+      "type": "interval",
+      "tip": {
+        "text": "S-T TIP 1",
+        "reaction": {
+          "hotkey": "Ctrl+Alt+R",
+          "script": "examples/reaction.ts"
+        }
+      },
       "interval": 8,
-      "showTime": 8,
-      "reaction": {
-        "hotkey": "Ctrl+Alt+R",
-        "script": "examples/reaction.ts"
-      }
+      "showTime": 8
     },
     {
-      "tip": "SHOW 6 TIP 2",
+      "type": "interval",
+      "tip": { "text": "SHOW 6 TIP 2" },
       "interval": 6,
       "showTime": 6
     },
     {
-      "tip": "LONG LONG LONG LONG LONG LONG TEXT TIP 3",
+      "type": "interval",
+      "tip": { "text": "LONG LONG LONG LONG LONG LONG TEXT TIP 3" },
       "interval": 20,
       "showTime": 10
     }

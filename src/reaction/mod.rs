@@ -5,7 +5,10 @@ mod runner;
 pub(crate) use global_hotkey::GlobalHotkeys;
 pub use runner::ReactionRunner;
 
-use crate::{controller::ActiveJobState, job::JobConfig};
+use crate::{
+    controller::{ActiveJobState, JobProcessing},
+    job::JobConfig,
+};
 use bevy::{app::AppExit, prelude::*};
 use global_hotkey::HotkeyEvent;
 use serde::Deserialize;
@@ -47,7 +50,7 @@ pub struct ReactionPlugin;
 
 impl Plugin for ReactionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, update_runner);
+        app.add_systems(Update, update_runner.after(JobProcessing));
     }
 }
 
@@ -66,8 +69,8 @@ fn update_runner(
 
     let reaction = active_job
         .current_index()
-        .and_then(|index| jobs.0.tips.get(index))
-        .and_then(|tip| tip.reaction.as_ref());
+        .and_then(|index| jobs.0.jobs.get(index))
+        .and_then(|job| job.tip().reaction.as_ref());
     let desired_hotkey = reaction.map(|reaction| reaction.hotkey.clone());
     if let Err(error) = hotkeys.set_active(desired_hotkey.clone()) {
         eprintln!("[Reaction] {error}");

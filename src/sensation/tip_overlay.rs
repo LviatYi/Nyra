@@ -12,7 +12,7 @@ use self::{
     style::RoundedRectangleMaskMaterial,
     text_scroll::animate_tip_text,
     transition::begin_tip_transition,
-    view::{drag_overlay, setup_overlay, sync_tip_colors, sync_tip_text},
+    view::{drag_overlay, setup_overlay, sync_overlay_visibility, sync_tip_colors, sync_tip_text},
 };
 use crate::controller::{ActiveJobState, JobProcessing};
 use bevy::{prelude::*, sprite_render::Material2dPlugin};
@@ -23,7 +23,7 @@ pub(super) fn configure(app: &mut App) {
         .add_systems(
             Update,
             (
-                (sync_tip_text, sync_tip_colors, begin_tip_transition)
+                (sync_overlay_visibility, sync_tip_text, sync_tip_colors, begin_tip_transition)
                     .chain()
                     .run_if(resource_changed::<ActiveJobState>),
                 animate_ripple,

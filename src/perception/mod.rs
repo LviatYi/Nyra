@@ -1,11 +1,17 @@
 mod selector;
 
+use crate::job::{Job, Jobs};
+use bevy::prelude::Resource;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 const CONDITION_VERSION: u32 = 1;
@@ -38,6 +44,159 @@ struct ConditionConfig {
     template: PathBuf,
     threshold: f64,
     poll_interval_ms: u64,
+}
+
+#[cfg(target_os = "windows")]
+struct PreparedJobCondition {
+    job_index: usize,
+    config: ConditionConfig,
+    template: Vec<u8>,
+}
+
+#[cfg(target_os = "windows")]
+struct WatchedJobCondition {
+    prepared: PreparedJobCondition,
+    monitor: xcap::Monitor,
+    next_poll: Instant,
+    matched: bool,
+    capture_failed: bool,
+}
+
+#[derive(Resource)]
+pub struct PerceptionObserver {
+    matches: Arc<Mutex<Vec<usize>>>,
+    stop: Arc<AtomicBool>,
+    worker: Mutex<Option<thread::JoinHandle<()>>>,
+}
+
+impl PerceptionObserver {
+    #[cfg(target_os = "windows")]
+    pub fn new(jobs: &Jobs, config_path: &Path) -> Result<Option<Self>, String> {
+        let base = config_path.parent().unwrap_or_else(|| Path::new("."));
+        let mut conditions = Vec::new();
+        for (job_index, job) in jobs.jobs.iter().enumerate() {
+            let Job::ImagePerception { image: condition, .. } = job else {
+                continue;
+            };
+            let path = base.join(condition);
+            let config = load_condition(&path)?;
+            let monitor = monitor_by_name(&config.monitor.name)?;
+            let width = monitor.width().map_err(|error| error.to_string())?;
+            let height = monitor.height().map_err(|error| error.to_string())?;
+            if width != config.monitor.width || height != config.monitor.height {
+                return Err(format!(
+                    "Configured monitor size for {} is {}x{}, but it is currently {}x{}",
+                    path.display(), config.monitor.width, config.monitor.height, width, height
+                ));
+            }
+            validate_region(config.region, width, height)?;
+            let template_path = path.parent().unwrap_or_else(|| Path::new(".")).join(&config.template);
+            let template = xcap::image::open(&template_path)
+                .map_err(|error| format!("Unable to load template {}: {error}", template_path.display()))?
+                .into_rgba8();
+            if template.width() != config.region.width || template.height() != config.region.height {
+                return Err(format!("Template size does not match the region in {}", path.display()));
+            }
+            conditions.push(PreparedJobCondition {
+                job_index,
+                config,
+                template: template.into_raw(),
+            });
+        }
+        if conditions.is_empty() {
+            return Ok(None);
+        }
+        let matches = Arc::new(Mutex::new(Vec::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_matches = matches.clone();
+        let worker_stop = stop.clone();
+        let worker = thread::Builder::new()
+            .name("perception-tips".into())
+            .spawn(move || watch_tip_conditions(conditions, worker_matches, worker_stop))
+            .map_err(|error| format!("Unable to start perception watcher: {error}"))?;
+        Ok(Some(Self {
+            matches,
+            stop,
+            worker: Mutex::new(Some(worker)),
+        }))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub fn new(jobs: &Jobs, _config_path: &Path) -> Result<Option<Self>, String> {
+        if jobs.jobs.iter().any(|job| matches!(job, Job::Perception { .. })) {
+            Err("Perception matching currently requires Windows".into())
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn matched_job_indexes(&self) -> Vec<usize> {
+        self.matches.lock().unwrap().clone()
+    }
+}
+
+impl Drop for PerceptionObserver {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(worker) = self.worker.lock().unwrap().take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn watch_tip_conditions(
+    conditions: Vec<PreparedJobCondition>,
+    matches: Arc<Mutex<Vec<usize>>>,
+    stop: Arc<AtomicBool>,
+) {
+    let mut watched = Vec::new();
+    for prepared in conditions {
+        match monitor_by_name(&prepared.config.monitor.name) {
+            Ok(monitor) => watched.push(WatchedJobCondition {
+                prepared,
+                monitor,
+                next_poll: Instant::now(),
+                matched: false,
+                capture_failed: false,
+            }),
+            Err(error) => eprintln!("[Perception] {error}"),
+        }
+    }
+    while !stop.load(Ordering::Relaxed) {
+        let now = Instant::now();
+        for item in &mut watched {
+            if now < item.next_poll {
+                continue;
+            }
+            item.next_poll = now + Duration::from_millis(item.prepared.config.poll_interval_ms);
+            let region = item.prepared.config.region;
+            match item.monitor.capture_region(region.x, region.y, region.width, region.height) {
+                Ok(frame) => {
+                    item.capture_failed = false;
+                    item.matched = similarity(&item.prepared.template, frame.as_raw())
+                        >= item.prepared.config.threshold;
+                }
+                Err(error) => {
+                    if !item.capture_failed {
+                        eprintln!("[Perception] Capture failed for job {}: {error}", item.prepared.job_index);
+                    }
+                    item.capture_failed = true;
+                    item.matched = false;
+                }
+            }
+        }
+        let current = watched.iter().filter(|item| item.matched)
+            .map(|item| item.prepared.job_index).collect::<Vec<_>>();
+        let mut shared = matches.lock().unwrap();
+        if *shared != current {
+            *shared = current;
+        }
+        drop(shared);
+        let delay = watched.iter().map(|item| item.next_poll.saturating_duration_since(Instant::now()))
+            .min().unwrap_or(Duration::from_millis(50)).min(Duration::from_millis(50));
+        thread::sleep(delay);
+    }
 }
 
 #[cfg(target_os = "windows")]

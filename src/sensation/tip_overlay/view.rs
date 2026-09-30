@@ -53,7 +53,7 @@ pub(super) fn setup_overlay(
     mut mask_materials: ResMut<Assets<RoundedRectangleMaskMaterial>>,
 ) {
     let current_color = tip_color(&tips, 0);
-    let next_index = 1 % tips.0.tips.len();
+    let next_index = 1 % tips.0.jobs.len();
     let next_color = tip_color(&tips, next_index);
     let size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32);
     // A ripple can originate on the overlay boundary and grow far enough to
@@ -88,7 +88,7 @@ pub(super) fn setup_overlay(
         mask_mesh: meshes.add(Rectangle::new(mask_size.x, mask_size.y)),
         mask_material: mask_materials.add(rounded_rectangle_mask_material()),
     };
-    let current_tip = tips.0.tips[0].tip.replace(['\r', '\n'], " ");
+    let current_tip = tips.0.jobs[0].tip().text.replace(['\r', '\n'], " ");
 
     commands.spawn_scene_list(overlay_scene(scene_assets, current_tip, border_path));
     commands.insert_resource(border_geometry);
@@ -206,13 +206,20 @@ pub(super) fn sync_tip_text(
     let Some(active_job) = state.active_job.as_ref() else {
         return;
     };
-    let Some(tip) = jobs.0.tips.get(active_job.current_index) else {
+    let Some(job) = jobs.0.jobs.get(active_job.current_index) else {
         return;
     };
-    let content = tip.tip.replace(['\r', '\n'], " ");
+    let content = job.tip().text.replace(['\r', '\n'], " ");
     if text.0 != content {
         text.0 = content;
     }
+}
+
+pub(super) fn sync_overlay_visibility(
+    state: Res<ActiveJobState>,
+    mut window: Single<&mut Window, With<PrimaryWindow>>,
+) {
+    window.visible = state.active_job.is_some();
 }
 
 pub(super) fn sync_tip_colors(
