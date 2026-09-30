@@ -40,7 +40,7 @@ fn main() -> ExitCode {
         .any(|arg| arg == "--help" || arg == "-h")
     {
         println!(
-            "Usage:\n  nyra.exe [config.json] [--run-script script.ts]\n  nyra.exe --perception-record condition.json\n  nyra.exe --perception-watch condition.json\n\nScript paths are resolved relative to the configuration file directory. Perception record/watch currently operate on one region of the primary monitor."
+            "Usage:\n  nyra.exe [config.json] [--run-script script.ts]\n  nyra.exe --perception-record condition.json [--window-title title | --screen]\n  nyra.exe --perception-watch condition.json\n\nScript paths are resolved relative to the configuration file directory. Perception recording selects a region on the primary monitor and detects its window by default; --screen records absolute screen coordinates."
         );
         return ExitCode::SUCCESS;
     }
@@ -61,14 +61,36 @@ fn launch() -> Result<(), String> {
         match command {
             "--perception-record" if raw_args.len() == 2 => {
                 configure_render_environment();
-                return perception::record_condition(Path::new(&raw_args[1]));
+                return perception::record_condition(
+                    Path::new(&raw_args[1]),
+                    perception::RecordTarget::AutoWindow,
+                );
+            }
+            "--perception-record"
+                if raw_args.len() == 4 && raw_args[2] == "--window-title" =>
+            {
+                let title = raw_args[3]
+                    .to_str()
+                    .ok_or("--window-title must be valid UTF-8")?;
+                configure_render_environment();
+                return perception::record_condition(
+                    Path::new(&raw_args[1]),
+                    perception::RecordTarget::Window(title),
+                );
+            }
+            "--perception-record" if raw_args.len() == 3 && raw_args[2] == "--screen" => {
+                configure_render_environment();
+                return perception::record_condition(
+                    Path::new(&raw_args[1]),
+                    perception::RecordTarget::Screen,
+                );
             }
             "--perception-watch" if raw_args.len() == 2 => {
                 return perception::watch_condition(Path::new(&raw_args[1]));
             }
             "--perception-record" | "--perception-watch" => {
                 return Err(format!(
-                    "{command} requires exactly one condition JSON path"
+                    "Invalid {command} arguments; use --help to see usage"
                 ));
             }
             _ => {}

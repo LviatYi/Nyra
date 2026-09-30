@@ -14,7 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-const CONDITION_VERSION: u32 = 1;
+const CONDITION_VERSION: u32 = 2;
 const DEFAULT_THRESHOLD: f64 = 0.95;
 const DEFAULT_POLL_INTERVAL_MS: u64 = 500;
 
@@ -39,11 +39,46 @@ struct MonitorConfig {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ConditionConfig {
     version: u32,
-    monitor: MonitorConfig,
-    region: Region,
+    target: CaptureTarget,
     template: PathBuf,
     threshold: f64,
     poll_interval_ms: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "mode", rename_all = "camelCase", deny_unknown_fields)]
+enum CaptureTarget {
+    Screen {
+        monitor: MonitorConfig,
+        region: Region,
+    },
+    Window {
+        title: String,
+        region: Region,
+    },
+}
+
+impl CaptureTarget {
+    fn region(&self) -> Region {
+        match self {
+            Self::Screen { region, .. } | Self::Window { region, .. } => *region,
+        }
+    }
+}
+
+pub enum RecordTarget<'a> {
+    AutoWindow,
+    Window(&'a str),
+    Screen,
+}
+
+#[cfg(target_os = "windows")]
+struct WindowBounds {
+    title: String,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
 }
 
 #[cfg(target_os = "windows")]
@@ -56,7 +91,6 @@ struct PreparedJobCondition {
 #[cfg(target_os = "windows")]
 struct WatchedJobCondition {
     prepared: PreparedJobCondition,
-    monitor: xcap::Monitor,
     next_poll: Instant,
     matched: bool,
     capture_failed: bool,
@@ -83,20 +117,7 @@ impl PerceptionObserver {
             };
             let path = base.join(condition);
             let config = load_condition(&path)?;
-            let monitor = monitor_by_name(&config.monitor.name)?;
-            let width = monitor.width().map_err(|error| error.to_string())?;
-            let height = monitor.height().map_err(|error| error.to_string())?;
-            if width != config.monitor.width || height != config.monitor.height {
-                return Err(format!(
-                    "Configured monitor size for {} is {}x{}, but it is currently {}x{}",
-                    path.display(),
-                    config.monitor.width,
-                    config.monitor.height,
-                    width,
-                    height
-                ));
-            }
-            validate_region(config.region, width, height)?;
+            validate_screen_target(&config.target)?;
             let template_path = path
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
@@ -109,7 +130,8 @@ impl PerceptionObserver {
                     )
                 })?
                 .into_rgba8();
-            if template.width() != config.region.width || template.height() != config.region.height
+            let region = config.target.region();
+            if template.width() != region.width || template.height() != region.height
             {
                 return Err(format!(
                     "Template size does not match the region in {}",
@@ -145,7 +167,7 @@ impl PerceptionObserver {
         if jobs
             .jobs
             .iter()
-            .any(|job| matches!(job, Job::Perception { .. }))
+            .any(|job| matches!(job, Job::ImagePerception { .. }))
         {
             Err("Perception matching currently requires Windows".into())
         } else {
@@ -175,33 +197,35 @@ fn watch_tip_conditions(
 ) {
     let mut watched = Vec::new();
     for prepared in conditions {
-        match monitor_by_name(&prepared.config.monitor.name) {
-            Ok(monitor) => watched.push(WatchedJobCondition {
-                prepared,
-                monitor,
-                next_poll: Instant::now(),
-                matched: false,
-                capture_failed: false,
-            }),
-            Err(error) => eprintln!("[Perception] {error}"),
-        }
+        watched.push(WatchedJobCondition {
+            prepared,
+            next_poll: Instant::now(),
+            matched: false,
+            capture_failed: false,
+        });
     }
     while !stop.load(Ordering::Relaxed) {
         let now = Instant::now();
         for item in &mut watched {
+            if item.matched
+                && let CaptureTarget::Window { title, .. } = &item.prepared.config.target
+                && !window_is_focused(title)
+            {
+                item.matched = false;
+            }
             if now < item.next_poll {
                 continue;
             }
             item.next_poll = now + Duration::from_millis(item.prepared.config.poll_interval_ms);
-            let region = item.prepared.config.region;
-            match item
-                .monitor
-                .capture_region(region.x, region.y, region.width, region.height)
-            {
-                Ok(frame) => {
+            match capture_target(&item.prepared.config.target) {
+                Ok(Some(frame)) => {
                     item.capture_failed = false;
                     item.matched = similarity(&item.prepared.template, frame.as_raw())
                         >= item.prepared.config.threshold;
+                }
+                Ok(None) => {
+                    item.capture_failed = false;
+                    item.matched = false;
                 }
                 Err(error) => {
                     if !item.capture_failed {
@@ -236,7 +260,7 @@ fn watch_tip_conditions(
 }
 
 #[cfg(target_os = "windows")]
-pub fn record_condition(condition_path: &Path) -> Result<(), String> {
+pub fn record_condition(condition_path: &Path, record_target: RecordTarget<'_>) -> Result<(), String> {
     if condition_path
         .extension()
         .is_none_or(|extension| extension != "json")
@@ -257,6 +281,26 @@ pub fn record_condition(condition_path: &Path) -> Result<(), String> {
     let monitor_height = monitor
         .height()
         .map_err(|error| format!("Unable to read primary monitor height: {error}"))?;
+    let monitor_x = monitor
+        .x()
+        .map_err(|error| format!("Unable to read primary monitor position: {error}"))?;
+    let monitor_y = monitor
+        .y()
+        .map_err(|error| format!("Unable to read primary monitor position: {error}"))?;
+    let windows = match record_target {
+        RecordTarget::AutoWindow => xcap::Window::all()
+            .map_err(|error| format!("Unable to enumerate windows: {error}"))?
+            .into_iter()
+            .filter_map(|window| window_bounds(&window).ok())
+            .collect::<Vec<_>>(),
+        RecordTarget::Window(title) => {
+            if title.trim().is_empty() {
+                return Err("Window title cannot be empty".into());
+            }
+            vec![window_bounds(&window_by_title(title)?)?]
+        }
+        RecordTarget::Screen => Vec::new(),
+    };
     let source = monitor
         .capture_image()
         .map_err(|error| format!("Unable to capture primary monitor before selection: {error}"))?;
@@ -269,6 +313,55 @@ pub fn record_condition(condition_path: &Path) -> Result<(), String> {
         .ok_or_else(|| "Perception region selection was cancelled".to_string())?;
     validate_region(region, monitor_width, monitor_height)?;
     let template = crop_rgba(source.as_raw(), monitor_width, monitor_height, region)?;
+    let selected_x = i64::from(monitor_x) + i64::from(region.x);
+    let selected_y = i64::from(monitor_y) + i64::from(region.y);
+    let window = match record_target {
+        RecordTarget::AutoWindow => {
+            let window = windows
+                .iter()
+                .find(|window| {
+                    selected_x >= i64::from(window.x)
+                        && selected_y >= i64::from(window.y)
+                        && selected_x + i64::from(region.width)
+                            <= i64::from(window.x) + i64::from(window.width)
+                        && selected_y + i64::from(region.height)
+                            <= i64::from(window.y) + i64::from(window.height)
+                })
+                .ok_or("No window contains the selected region; use --screen for an absolute screen region")?;
+            if windows.iter().filter(|candidate| candidate.title == window.title).count() > 1 {
+                return Err(format!("Multiple windows have the same title: {}", window.title));
+            }
+            Some(window)
+        }
+        RecordTarget::Window(_) => windows.first(),
+        RecordTarget::Screen => None,
+    };
+    let target = if let Some(window) = window {
+        let relative_x = selected_x - i64::from(window.x);
+        let relative_y = selected_y - i64::from(window.y);
+        let relative_region = Region {
+            x: u32::try_from(relative_x)
+                .map_err(|_| "Selected region starts outside the titled window")?,
+            y: u32::try_from(relative_y)
+                .map_err(|_| "Selected region starts outside the titled window")?,
+            width: region.width,
+            height: region.height,
+        };
+        validate_region(relative_region, window.width, window.height)?;
+        CaptureTarget::Window {
+            title: window.title.clone(),
+            region: relative_region,
+        }
+    } else {
+        CaptureTarget::Screen {
+            monitor: MonitorConfig {
+                name: monitor_name,
+                width: monitor_width,
+                height: monitor_height,
+            },
+            region,
+        }
+    };
 
     let condition_directory = condition_path
         .parent()
@@ -289,12 +382,7 @@ pub fn record_condition(condition_path: &Path) -> Result<(), String> {
 
     let condition = ConditionConfig {
         version: CONDITION_VERSION,
-        monitor: MonitorConfig {
-            name: monitor_name,
-            width: monitor_width,
-            height: monitor_height,
-        },
-        region,
+        target,
         template: PathBuf::from(template_filename),
         threshold: DEFAULT_THRESHOLD,
         poll_interval_ms: DEFAULT_POLL_INTERVAL_MS,
@@ -336,39 +424,50 @@ pub fn record_condition(condition_path: &Path) -> Result<(), String> {
     })?;
 
     println!(
-        "[Perception] Recorded region x={} y={} width={} height={}\n[Perception] Condition: {}\n[Perception] Template: {}",
-        region.x,
-        region.y,
-        region.width,
-        region.height,
+        "[Perception] Condition: {}\n[Perception] Image: {}",
         condition_path.display(),
         template_path.display()
     );
+    match &condition.target {
+        CaptureTarget::Window { title, region } => println!(
+            "[Perception] Window title: {title}\n[Perception] Relative region: x={} y={} width={} height={}",
+            region.x, region.y, region.width, region.height
+        ),
+        CaptureTarget::Screen { region, .. } => println!(
+            "[Perception] Screen region: x={} y={} width={} height={}",
+            region.x, region.y, region.width, region.height
+        ),
+    }
     Ok(())
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn record_condition(_condition_path: &Path) -> Result<(), String> {
+pub fn record_condition(_condition_path: &Path, _record_target: RecordTarget<'_>) -> Result<(), String> {
     Err("Perception recording currently requires Windows".into())
+}
+
+#[cfg(target_os = "windows")]
+fn window_bounds(window: &xcap::Window) -> Result<WindowBounds, String> {
+    let title = window.title().map_err(|error| error.to_string())?;
+    if title.trim().is_empty() {
+        return Err("Window has no title".into());
+    }
+    if window.is_minimized().map_err(|error| error.to_string())? {
+        return Err(format!("Window is minimized: {title}"));
+    }
+    Ok(WindowBounds {
+        title,
+        x: window.x().map_err(|error| error.to_string())?,
+        y: window.y().map_err(|error| error.to_string())?,
+        width: window.width().map_err(|error| error.to_string())?,
+        height: window.height().map_err(|error| error.to_string())?,
+    })
 }
 
 #[cfg(target_os = "windows")]
 pub fn watch_condition(condition_path: &Path) -> Result<(), String> {
     let condition = load_condition(condition_path)?;
-    let monitor = monitor_by_name(&condition.monitor.name)?;
-    let monitor_width = monitor
-        .width()
-        .map_err(|error| format!("Unable to read configured monitor width: {error}"))?;
-    let monitor_height = monitor
-        .height()
-        .map_err(|error| format!("Unable to read configured monitor height: {error}"))?;
-    if monitor_width != condition.monitor.width || monitor_height != condition.monitor.height {
-        return Err(format!(
-            "Configured monitor size is {}x{}, but it is currently {}x{}; record the condition again",
-            condition.monitor.width, condition.monitor.height, monitor_width, monitor_height
-        ));
-    }
-    validate_region(condition.region, monitor_width, monitor_height)?;
+    validate_screen_target(&condition.target)?;
 
     let condition_directory = condition_path
         .parent()
@@ -383,33 +482,29 @@ pub fn watch_condition(condition_path: &Path) -> Result<(), String> {
             )
         })?
         .into_rgba8();
-    if template.width() != condition.region.width || template.height() != condition.region.height {
+    let region = condition.target.region();
+    if template.width() != region.width || template.height() != region.height {
         return Err(format!(
             "Template is {}x{}, but the configured region is {}x{}",
             template.width(),
             template.height(),
-            condition.region.width,
-            condition.region.height
+            region.width,
+            region.height
         ));
     }
 
     println!(
-        "[Perception] Watching {} on monitor {} every {} ms; threshold={:.4}; press Ctrl+C to stop",
+        "[Perception] Watching {} with target {:?} every {} ms; threshold={:.4}; press Ctrl+C to stop",
         condition_path.display(),
-        condition.monitor.name,
+        condition.target,
         condition.poll_interval_ms,
         condition.threshold
     );
     let mut sample = 0u64;
     loop {
         sample += 1;
-        match monitor.capture_region(
-            condition.region.x,
-            condition.region.y,
-            condition.region.width,
-            condition.region.height,
-        ) {
-            Ok(frame) => {
+        match capture_target(&condition.target) {
+            Ok(Some(frame)) => {
                 let score = similarity(template.as_raw(), frame.as_raw());
                 let state = if score >= condition.threshold {
                     "MATCHED"
@@ -421,6 +516,9 @@ pub fn watch_condition(condition_path: &Path) -> Result<(), String> {
                     condition.threshold
                 );
             }
+            Ok(None) => println!(
+                "[Perception] sample={sample} state=NOT_MATCHED window is not focused"
+            ),
             Err(error) => {
                 eprintln!("[Perception] sample={sample} state=UNKNOWN capture failed: {error}")
             }
@@ -451,6 +549,20 @@ fn load_condition(path: &Path) -> Result<ConditionConfig, String> {
     if condition.poll_interval_ms == 0 {
         return Err("Perception condition pollIntervalMs must be greater than 0".into());
     }
+    match &condition.target {
+        CaptureTarget::Screen { monitor, region } => {
+            if monitor.name.trim().is_empty() {
+                return Err("Perception screen monitor name cannot be empty".into());
+            }
+            validate_region(*region, monitor.width, monitor.height)?;
+        }
+        CaptureTarget::Window { title, region } => {
+            if title.trim().is_empty() {
+                return Err("Perception window title cannot be empty".into());
+            }
+            validate_region(*region, u32::MAX, u32::MAX)?;
+        }
+    }
     if condition.template.as_os_str().is_empty() || condition.template.is_absolute() {
         return Err("Perception condition template must be a relative path".into());
     }
@@ -471,11 +583,115 @@ fn validate_region(region: Region, monitor_width: u32, monitor_height: u32) -> R
         .ok_or("Perception region vertical bounds overflow")?;
     if right > monitor_width || bottom > monitor_height {
         return Err(format!(
-            "Perception region ({}, {}, {}, {}) exceeds monitor size {}x{}",
+            "Perception region ({}, {}, {}, {}) exceeds target size {}x{}",
             region.x, region.y, region.width, region.height, monitor_width, monitor_height
         ));
     }
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn validate_screen_target(target: &CaptureTarget) -> Result<(), String> {
+    if let CaptureTarget::Screen { monitor, region } = target {
+        screen_monitor(monitor, *region)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn screen_monitor(config: &MonitorConfig, region: Region) -> Result<xcap::Monitor, String> {
+    let monitor = monitor_by_name(&config.name)?;
+    let width = monitor.width().map_err(|error| error.to_string())?;
+    let height = monitor.height().map_err(|error| error.to_string())?;
+    if width != config.width || height != config.height {
+        return Err(format!(
+            "Configured monitor size is {}x{}, but it is currently {}x{}",
+            config.width, config.height, width, height
+        ));
+    }
+    validate_region(region, width, height)?;
+    Ok(monitor)
+}
+
+#[cfg(target_os = "windows")]
+fn capture_target(target: &CaptureTarget) -> Result<Option<xcap::image::RgbaImage>, String> {
+    match target {
+        CaptureTarget::Screen { monitor, region } => {
+            let monitor = screen_monitor(monitor, *region)?;
+            monitor
+                .capture_region(region.x, region.y, region.width, region.height)
+                .map(Some)
+                .map_err(|error| error.to_string())
+        }
+        CaptureTarget::Window { title, region } => {
+            let window = window_by_title(title)?;
+            if !window.is_focused().map_err(|error| error.to_string())? {
+                return Ok(None);
+            }
+            if window.is_minimized().map_err(|error| error.to_string())? {
+                return Err(format!("Window is minimized: {title}"));
+            }
+            let width = window.width().map_err(|error| error.to_string())?;
+            let height = window.height().map_err(|error| error.to_string())?;
+            validate_region(*region, width, height)?;
+
+            let x = i64::from(window.x().map_err(|error| error.to_string())?)
+                + i64::from(region.x);
+            let y = i64::from(window.y().map_err(|error| error.to_string())?)
+                + i64::from(region.y);
+            let monitors = xcap::Monitor::all()
+                .map_err(|error| format!("Unable to enumerate monitors: {error}"))?;
+            for monitor in monitors {
+                let monitor_x = i64::from(monitor.x().map_err(|error| error.to_string())?);
+                let monitor_y = i64::from(monitor.y().map_err(|error| error.to_string())?);
+                let monitor_width = i64::from(monitor.width().map_err(|error| error.to_string())?);
+                let monitor_height = i64::from(monitor.height().map_err(|error| error.to_string())?);
+                let local_x = x - monitor_x;
+                let local_y = y - monitor_y;
+                if local_x >= 0
+                    && local_y >= 0
+                    && local_x + i64::from(region.width) <= monitor_width
+                    && local_y + i64::from(region.height) <= monitor_height
+                {
+                    let frame = monitor
+                        .capture_region(
+                            local_x as u32,
+                            local_y as u32,
+                            region.width,
+                            region.height,
+                        )
+                        .map_err(|error| error.to_string())?;
+                    return if window.is_focused().map_err(|error| error.to_string())? {
+                        Ok(Some(frame))
+                    } else {
+                        Ok(None)
+                    };
+                }
+            }
+            Err(format!("Window region is not fully visible on one monitor: {title}"))
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn window_is_focused(title: &str) -> bool {
+    window_by_title(title)
+        .and_then(|window| window.is_focused().map_err(|error| error.to_string()))
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+fn window_by_title(title: &str) -> Result<xcap::Window, String> {
+    let windows = xcap::Window::all()
+        .map_err(|error| format!("Unable to enumerate windows: {error}"))?;
+    let mut matches = windows
+        .into_iter()
+        .filter(|window| window.title().is_ok_and(|candidate| candidate == title));
+    let window = matches.next().ok_or_else(|| format!("Window not found: {title}"))?;
+    if matches.next().is_some() {
+        return Err(format!("Multiple windows have the same title: {title}"));
+    }
+    Ok(window)
 }
 
 fn crop_rgba(
