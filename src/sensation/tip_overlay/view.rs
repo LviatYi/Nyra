@@ -11,8 +11,8 @@ use super::{
     text_scroll::{TextScroll, TipTextViewport},
 };
 use crate::{
-    job::JobConfig,
     controller::ActiveJobState,
+    job::JobConfig,
     settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH},
 };
 use bevy::{prelude::*, text::FontSourceTemplate, window::PrimaryWindow};
@@ -82,9 +82,8 @@ pub(super) fn setup_overlay(
         played_material: color_materials.add(overlay_color_material(next_color)),
         countdown_mesh,
         countdown_material: color_materials.add(overlay_color_material(current_color)),
-        shade_material: color_materials.add(overlay_color_material(Color::srgba(
-            0.0, 0.0, 0.0, 0.0,
-        ))),
+        shade_material: color_materials
+            .add(overlay_color_material(Color::srgba(0.0, 0.0, 0.0, 0.0))),
         mask_mesh: meshes.add(Rectangle::new(mask_size.x, mask_size.y)),
         mask_material: mask_materials.add(rounded_rectangle_mask_material()),
     };

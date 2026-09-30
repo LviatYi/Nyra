@@ -169,9 +169,13 @@ impl JobConfig {
 
     /// Returns the configured color or the palette color assigned to this job position.
     pub fn resolved_color_at(&self, job_index: usize) -> &str {
-        self.0.jobs[job_index].tip().color.as_deref().unwrap_or_else(|| {
-            let colors = crate::settings_default_values::DEFAULT_TIP_COLORS;
-            colors[job_index % colors.len()]
-        })
+        self.0.jobs[job_index]
+            .tip()
+            .color
+            .as_deref()
+            .unwrap_or_else(|| {
+                let colors = crate::settings_default_values::DEFAULT_TIP_COLORS;
+                colors[job_index % colors.len()]
+            })
     }
 }

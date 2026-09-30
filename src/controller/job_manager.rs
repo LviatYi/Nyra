@@ -105,10 +105,14 @@ impl JobManager {
         }
 
         if state.active_job.as_ref().is_some_and(|job| {
-            matches!(&config.0.jobs[job.current_index], Job::ImagePerception { .. })
+            matches!(
+                &config.0.jobs[job.current_index],
+                Job::ImagePerception { .. }
+            )
         }) {
             let last_start = state.active_job.as_ref().map(|job| job.anim_ripple_rng_at);
-            let next = self.select_next(config, now, None)
+            let next = self
+                .select_next(config, now, None)
                 .map(|index| self.create_job(config, index, now, last_start));
             return JobUpdate::Replace(next);
         }
@@ -131,9 +135,9 @@ impl JobManager {
         // interval starts after presentation completes; the job's own showTime does
         // not consume its next interval.
         self.jobs[completed_index].finished_at = Some(now);
-        let next = self.select_next(config, now, Some(completed_index)).map(|index| {
-            self.create_job(config, index, now, Some(active_job.anim_ripple_rng_at))
-        });
+        let next = self
+            .select_next(config, now, Some(completed_index))
+            .map(|index| self.create_job(config, index, now, Some(active_job.anim_ripple_rng_at)));
         JobUpdate::Replace(next)
     }
 

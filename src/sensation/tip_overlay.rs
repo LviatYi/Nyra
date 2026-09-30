@@ -23,7 +23,12 @@ pub(super) fn configure(app: &mut App) {
         .add_systems(
             Update,
             (
-                (sync_overlay_visibility, sync_tip_text, sync_tip_colors, begin_tip_transition)
+                (
+                    sync_overlay_visibility,
+                    sync_tip_text,
+                    sync_tip_colors,
+                    begin_tip_transition,
+                )
                     .chain()
                     .run_if(resource_changed::<ActiveJobState>),
                 animate_ripple,

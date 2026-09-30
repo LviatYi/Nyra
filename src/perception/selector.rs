@@ -9,9 +9,7 @@ use bevy::{
         render_resource::{Extent3d, TextureDimension, TextureFormat},
         settings::{Backends, WgpuSettings},
     },
-    window::{
-        MonitorSelection, PrimaryWindow, WindowLevel, WindowMode, WindowResolution,
-    },
+    window::{MonitorSelection, PrimaryWindow, WindowLevel, WindowMode, WindowResolution},
 };
 use std::sync::{Arc, Mutex};
 
@@ -176,8 +174,16 @@ fn select_with_mouse(
         };
         let left = start.x.min(end.x).floor().max(0.0) as u32;
         let top = start.y.min(end.y).floor().max(0.0) as u32;
-        let right = start.x.max(end.x).ceil().min(window.physical_width() as f32) as u32;
-        let bottom = start.y.max(end.y).ceil().min(window.physical_height() as f32) as u32;
+        let right = start
+            .x
+            .max(end.x)
+            .ceil()
+            .min(window.physical_width() as f32) as u32;
+        let bottom = start
+            .y
+            .max(end.y)
+            .ceil()
+            .min(window.physical_height() as f32) as u32;
         if right <= left || bottom <= top {
             rectangle.display = Display::None;
             return;

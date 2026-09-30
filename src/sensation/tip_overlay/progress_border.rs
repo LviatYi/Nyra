@@ -376,8 +376,8 @@ fn border_vertex_pair(inner: OutlinePoint, outer_half_size: Vec2) -> BorderVerte
     } else {
         (outer_half_size.y - inner.position.y.abs()) / inner.outward.y.abs()
     };
-    let outer = inner.position
-        + inner.outward * distance_to_vertical_edge.min(distance_to_horizontal_edge);
+    let outer =
+        inner.position + inner.outward * distance_to_vertical_edge.min(distance_to_horizontal_edge);
     BorderVertexPair {
         outer: [outer.x, outer.y, 0.0],
         inner: [inner.position.x, inner.position.y, 0.0],

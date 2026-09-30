@@ -67,7 +67,9 @@ fn launch() -> Result<(), String> {
                 return perception::watch_condition(Path::new(&raw_args[1]));
             }
             "--perception-record" | "--perception-watch" => {
-                return Err(format!("{command} requires exactly one condition JSON path"));
+                return Err(format!(
+                    "{command} requires exactly one condition JSON path"
+                ));
             }
             _ => {}
         }
@@ -118,7 +120,8 @@ fn launch() -> Result<(), String> {
             .jobs
             .iter()
             .filter_map(|job| {
-                job.tip().reaction
+                job.tip()
+                    .reaction
                     .as_ref()
                     .map(|reaction| reaction.script.clone())
             })
@@ -208,7 +211,11 @@ fn validate_config(config: &Jobs) -> Result<(), String> {
             return Err(format!("{name}.tip.text cannot be empty"));
         }
         match job {
-            Job::Interval { interval, show_time, .. } => {
+            Job::Interval {
+                interval,
+                show_time,
+                ..
+            } => {
                 if *interval == 0 {
                     return Err(format!("{name}.interval must be greater than 0"));
                 }
@@ -216,7 +223,9 @@ fn validate_config(config: &Jobs) -> Result<(), String> {
                     return Err(format!("{name}.showTime must be greater than 0"));
                 }
             }
-            Job::ImagePerception { image: condition, .. } if condition.as_os_str().is_empty() => {
+            Job::ImagePerception {
+                image: condition, ..
+            } if condition.as_os_str().is_empty() => {
                 return Err(format!("{name}.condition cannot be empty"));
             }
             Job::ImagePerception { .. } => {}
@@ -241,8 +250,7 @@ fn run(
     if let Some(observer) = observer {
         app.insert_resource(observer);
     }
-    app
-        .insert_resource(ClearColor(Color::NONE))
+    app.insert_resource(ClearColor(Color::NONE))
         .insert_resource(JobConfig(config))
         .insert_resource(runner)
         .insert_resource(hotkeys)

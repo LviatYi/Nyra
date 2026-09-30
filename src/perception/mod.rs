@@ -75,7 +75,10 @@ impl PerceptionObserver {
         let base = config_path.parent().unwrap_or_else(|| Path::new("."));
         let mut conditions = Vec::new();
         for (job_index, job) in jobs.jobs.iter().enumerate() {
-            let Job::ImagePerception { image: condition, .. } = job else {
+            let Job::ImagePerception {
+                image: condition, ..
+            } = job
+            else {
                 continue;
             };
             let path = base.join(condition);
@@ -86,16 +89,32 @@ impl PerceptionObserver {
             if width != config.monitor.width || height != config.monitor.height {
                 return Err(format!(
                     "Configured monitor size for {} is {}x{}, but it is currently {}x{}",
-                    path.display(), config.monitor.width, config.monitor.height, width, height
+                    path.display(),
+                    config.monitor.width,
+                    config.monitor.height,
+                    width,
+                    height
                 ));
             }
             validate_region(config.region, width, height)?;
-            let template_path = path.parent().unwrap_or_else(|| Path::new(".")).join(&config.template);
+            let template_path = path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(&config.template);
             let template = xcap::image::open(&template_path)
-                .map_err(|error| format!("Unable to load template {}: {error}", template_path.display()))?
+                .map_err(|error| {
+                    format!(
+                        "Unable to load template {}: {error}",
+                        template_path.display()
+                    )
+                })?
                 .into_rgba8();
-            if template.width() != config.region.width || template.height() != config.region.height {
-                return Err(format!("Template size does not match the region in {}", path.display()));
+            if template.width() != config.region.width || template.height() != config.region.height
+            {
+                return Err(format!(
+                    "Template size does not match the region in {}",
+                    path.display()
+                ));
             }
             conditions.push(PreparedJobCondition {
                 job_index,
@@ -123,7 +142,11 @@ impl PerceptionObserver {
 
     #[cfg(not(target_os = "windows"))]
     pub fn new(jobs: &Jobs, _config_path: &Path) -> Result<Option<Self>, String> {
-        if jobs.jobs.iter().any(|job| matches!(job, Job::Perception { .. })) {
+        if jobs
+            .jobs
+            .iter()
+            .any(|job| matches!(job, Job::Perception { .. }))
+        {
             Err("Perception matching currently requires Windows".into())
         } else {
             Ok(None)
@@ -171,7 +194,10 @@ fn watch_tip_conditions(
             }
             item.next_poll = now + Duration::from_millis(item.prepared.config.poll_interval_ms);
             let region = item.prepared.config.region;
-            match item.monitor.capture_region(region.x, region.y, region.width, region.height) {
+            match item
+                .monitor
+                .capture_region(region.x, region.y, region.width, region.height)
+            {
                 Ok(frame) => {
                     item.capture_failed = false;
                     item.matched = similarity(&item.prepared.template, frame.as_raw())
@@ -179,29 +205,42 @@ fn watch_tip_conditions(
                 }
                 Err(error) => {
                     if !item.capture_failed {
-                        eprintln!("[Perception] Capture failed for job {}: {error}", item.prepared.job_index);
+                        eprintln!(
+                            "[Perception] Capture failed for job {}: {error}",
+                            item.prepared.job_index
+                        );
                     }
                     item.capture_failed = true;
                     item.matched = false;
                 }
             }
         }
-        let current = watched.iter().filter(|item| item.matched)
-            .map(|item| item.prepared.job_index).collect::<Vec<_>>();
+        let current = watched
+            .iter()
+            .filter(|item| item.matched)
+            .map(|item| item.prepared.job_index)
+            .collect::<Vec<_>>();
         let mut shared = matches.lock().unwrap();
         if *shared != current {
             *shared = current;
         }
         drop(shared);
-        let delay = watched.iter().map(|item| item.next_poll.saturating_duration_since(Instant::now()))
-            .min().unwrap_or(Duration::from_millis(50)).min(Duration::from_millis(50));
+        let delay = watched
+            .iter()
+            .map(|item| item.next_poll.saturating_duration_since(Instant::now()))
+            .min()
+            .unwrap_or(Duration::from_millis(50))
+            .min(Duration::from_millis(50));
         thread::sleep(delay);
     }
 }
 
 #[cfg(target_os = "windows")]
 pub fn record_condition(condition_path: &Path) -> Result<(), String> {
-    if condition_path.extension().is_none_or(|extension| extension != "json") {
+    if condition_path
+        .extension()
+        .is_none_or(|extension| extension != "json")
+    {
         return Err(format!(
             "Perception condition path must use the .json extension: {}",
             condition_path.display()
@@ -283,8 +322,12 @@ pub fn record_condition(condition_path: &Path) -> Result<(), String> {
         )
         .map_err(|error| format!("Unable to encode template as PNG: {error}"))?;
     }
-    fs::write(&template_path, encoded_template)
-        .map_err(|error| format!("Unable to save template {}: {error}", template_path.display()))?;
+    fs::write(&template_path, encoded_template).map_err(|error| {
+        format!(
+            "Unable to save template {}: {error}",
+            template_path.display()
+        )
+    })?;
     fs::write(condition_path, json).map_err(|error| {
         format!(
             "Unable to save condition {}: {error}",
@@ -333,7 +376,12 @@ pub fn watch_condition(condition_path: &Path) -> Result<(), String> {
         .unwrap_or_else(|| Path::new("."));
     let template_path = condition_directory.join(&condition.template);
     let template = xcap::image::open(&template_path)
-        .map_err(|error| format!("Unable to load template {}: {error}", template_path.display()))?
+        .map_err(|error| {
+            format!(
+                "Unable to load template {}: {error}",
+                template_path.display()
+            )
+        })?
         .into_rgba8();
     if template.width() != condition.region.width || template.height() != condition.region.height {
         return Err(format!(
@@ -373,9 +421,9 @@ pub fn watch_condition(condition_path: &Path) -> Result<(), String> {
                     condition.threshold
                 );
             }
-            Err(error) => eprintln!(
-                "[Perception] sample={sample} state=UNKNOWN capture failed: {error}"
-            ),
+            Err(error) => {
+                eprintln!("[Perception] sample={sample} state=UNKNOWN capture failed: {error}")
+            }
         }
         thread::sleep(Duration::from_millis(condition.poll_interval_ms));
     }
