@@ -52,10 +52,6 @@ impl Ripple {
         }
     }
 
-    pub(super) fn displayed_tip_index(&self) -> usize {
-        self.displayed_tip_index
-    }
-
     pub(super) fn begin(
         &mut self,
         now: Duration,
