@@ -3,7 +3,7 @@ use super::{
     style::set_material_color,
 };
 use crate::{
-    sensation::job_manager::ActiveJobState,
+    controller::ActiveJobState,
     settings_default_values::{
         TIP_OVERLAY_BORDER_WIDTH, TIP_OVERLAY_CORNER_RADIUS, TIP_OVERLAY_COUNTDOWN_DARKENING,
         WINDOW_HEIGHT, WINDOW_WIDTH,

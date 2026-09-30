@@ -3,20 +3,20 @@ use bevy::prelude::*;
 use rand::RngExt;
 use std::time::Duration;
 
-pub(super) struct ActiveJob {
-    pub(super) current_index: usize,
-    pub(super) preview_next_index: usize,
-    pub(super) anim_ripple_rng_at: f32,
-    pub(super) started_at: Duration,
-    pub(super) ends_at: Duration,
+pub(crate) struct ActiveJob {
+    pub(crate) current_index: usize,
+    pub(crate) preview_next_index: usize,
+    pub(crate) anim_ripple_rng_at: f32,
+    pub(crate) started_at: Duration,
+    ends_at: Duration,
 }
 
 impl ActiveJob {
-    pub(super) fn elapsed_at(&self, now: Duration) -> Duration {
+    fn elapsed_at(&self, now: Duration) -> Duration {
         now.saturating_sub(self.started_at)
     }
 
-    pub(super) fn remaining_fraction_at(&self, now: Duration) -> f32 {
+    pub(crate) fn remaining_fraction_at(&self, now: Duration) -> f32 {
         let duration = self.ends_at.saturating_sub(self.started_at).as_secs_f32();
         if duration == 0.0 {
             return 0.0;
@@ -28,7 +28,7 @@ impl ActiveJob {
 /// Read-only scheduling result consumed by presentation systems.
 #[derive(Resource, Default)]
 pub(crate) struct ActiveJobState {
-    pub(super) active_job: Option<ActiveJob>,
+    pub(crate) active_job: Option<ActiveJob>,
 }
 
 impl ActiveJobState {

@@ -12,7 +12,7 @@ use super::{
 };
 use crate::{
     job::JobConfig,
-    sensation::job_manager::ActiveJobState,
+    controller::ActiveJobState,
     settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH},
 };
 use bevy::{prelude::*, text::FontSourceTemplate, window::PrimaryWindow};

@@ -1,3 +1,4 @@
+mod controller;
 mod job;
 mod perception;
 mod reaction;
@@ -10,6 +11,7 @@ use std::{
     process::ExitCode,
 };
 
+use crate::controller::ControllerPlugin;
 use crate::job::{JobConfig, Tips, is_valid_tip_color};
 use crate::reaction::{GlobalHotkeys, ReactionConfig, ReactionPlugin, ReactionRunner, RunState};
 use crate::sensation::SensoryPlugin;
@@ -251,6 +253,7 @@ fn run(config: Tips, runner: ReactionRunner, hotkeys: GlobalHotkeys) {
                     ..default()
                 }),
         )
+        .add_plugins(ControllerPlugin)
         .add_plugins(SensoryPlugin)
         .add_plugins(ReactionPlugin)
         .run();

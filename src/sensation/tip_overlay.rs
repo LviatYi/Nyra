@@ -14,7 +14,7 @@ use self::{
     transition::begin_tip_transition,
     view::{drag_overlay, setup_overlay, sync_tip_colors, sync_tip_text},
 };
-use super::job_manager::{ActiveJobState, process_jobs};
+use crate::controller::{ActiveJobState, JobProcessing};
 use bevy::{prelude::*, sprite_render::Material2dPlugin};
 
 pub(super) fn configure(app: &mut App) {
@@ -23,7 +23,6 @@ pub(super) fn configure(app: &mut App) {
         .add_systems(
             Update,
             (
-                process_jobs,
                 (sync_tip_text, sync_tip_colors, begin_tip_transition)
                     .chain()
                     .run_if(resource_changed::<ActiveJobState>),
@@ -31,7 +30,8 @@ pub(super) fn configure(app: &mut App) {
                 animate_tip_text,
                 update_countdown_border,
             )
-                .chain(),
+                .chain()
+                .after(JobProcessing),
         )
         .add_systems(Update, drag_overlay);
 }

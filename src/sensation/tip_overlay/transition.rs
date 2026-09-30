@@ -3,7 +3,7 @@ use super::{
     ripple::Ripple,
     style::{set_material_color, tip_color},
 };
-use crate::{job::JobConfig, sensation::job_manager::ActiveJobState};
+use crate::{controller::ActiveJobState, job::JobConfig};
 use bevy::prelude::*;
 
 /// Starts all visual state tied to a newly selected tip.
