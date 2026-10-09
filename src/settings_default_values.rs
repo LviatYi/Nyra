@@ -14,15 +14,7 @@ pub const DEFAULT_TIP_COLORS: &[&str] = &[
     "#33E078", "#4DA3FF", "#A879FF", "#FFB347", "#FF6685", "#37D6D0",
 ];
 
-pub const TIP_OVERLAY_BORDER_WIDTH: f32 = 5.0;
-pub const TIP_OVERLAY_COUNTDOWN_DARKENING: f32 = 0.80;
-pub const TIP_OVERLAY_CORNER_RADIUS: f32 = 12.0;
-pub const TIP_OVERLAY_CORNER_SEGMENTS: usize = 12;
 pub const TIP_OVERLAY_BACKGROUND_BRIGHTNESS: f32 = 0.18;
-pub const TIP_OVERLAY_BACKGROUND_ALPHA: f32 = 0.60;
-pub const TIP_OVERLAY_RIPPLE_SEGMENTS: usize = 96;
-pub const TIP_OVERLAY_RIPPLE_EXPAND_DURATION: Duration = Duration::from_millis(360);
-pub const TIP_OVERLAY_RIPPLE_FADE_DURATION: Duration = Duration::from_millis(240);
 pub const TIP_TEXT_SCROLL_START_WAIT_DURATION: Duration = Duration::from_millis(1500);
 pub const TIP_TEXT_SCROLL_END_WAIT_DURATION: Duration = Duration::from_millis(1000);
 pub const TIP_TEXT_SCROLL_SPEED: f32 = 120.0;

@@ -1,397 +1,58 @@
-use super::{
-    geometry::{OutlinePoint, rounded_rectangle_outline, triangle_mesh},
-    style::set_material_color,
-};
-use crate::{
-    controller::ActiveJobState,
-    settings_default_values::{
-        TIP_OVERLAY_BORDER_WIDTH, TIP_OVERLAY_CORNER_RADIUS, TIP_OVERLAY_COUNTDOWN_DARKENING,
-        WINDOW_HEIGHT, WINDOW_WIDTH,
-    },
-};
-use bevy::{
-    mesh::{Indices, VertexAttributeValues},
-    prelude::*,
-};
+use super::geometry::BorderGeometry;
+use crate::controller::ActiveJobState;
+use bevy::prelude::*;
 
 #[derive(Component)]
-pub(super) struct CountdownBorder {
-    /// Visible fraction of the rounded outline, in the inclusive range `0.0..=1.0`.
+pub(super) struct BorderProgress {
+    geometry: BorderGeometry,
     progress: f32,
-    path: ProgressBorderPath,
-    topology: VisibleBorderTopology,
+}
+
+impl BorderProgress {
+    pub(super) fn new(geometry: BorderGeometry) -> Self {
+        Self {
+            geometry,
+            progress: 1.0,
+        }
+    }
+
+    pub(super) fn mesh(&self) -> Mesh {
+        self.geometry.progress_mesh(self.progress)
+    }
 }
 
 #[derive(Component, Default, Clone)]
-pub(super) struct CountdownBorderShade;
+pub(super) struct CountdownText;
 
-#[derive(Resource)]
-pub(super) struct ProgressBorderGeometry {
-    samples: Vec<BorderSample>,
-}
-
-#[derive(Clone, Copy)]
-struct BorderVertexPair {
-    outer: [f32; 3],
-    inner: [f32; 3],
-}
-
-impl BorderVertexPair {
-    fn lerp(self, other: Self, factor: f32) -> Self {
-        Self {
-            outer: Vec3::from(self.outer)
-                .lerp(Vec3::from(other.outer), factor)
-                .to_array(),
-            inner: Vec3::from(self.inner)
-                .lerp(Vec3::from(other.inner), factor)
-                .to_array(),
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct BorderSample {
-    /// Normalized distance along the closed centerline.
-    progress: f32,
-    center: Vec2,
-    vertices: BorderVertexPair,
-}
-
-/// One cached lap of the border, rebased so that progress `0.0` is the ripple origin.
-#[derive(Clone)]
-pub(super) struct ProgressBorderPath {
-    start_progress: f32,
-    samples: Vec<BorderPathSample>,
-    full_indices: Vec<u32>,
-}
-
-#[derive(Clone, Copy)]
-struct BorderPathSample {
-    /// Distance from this path's start, normalized to one complete lap.
-    progress: f32,
-    vertices: BorderVertexPair,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct VisibleBorderTopology {
-    complete_segments: usize,
-    has_partial_segment: bool,
-}
-
-struct VisibleBorderSlice {
-    topology: VisibleBorderTopology,
-    endpoint: Option<BorderVertexPair>,
-}
-
-impl CountdownBorder {
-    pub(super) fn new(path: ProgressBorderPath) -> Self {
-        let topology = VisibleBorderTopology {
-            complete_segments: path.samples.len() - 1,
-            has_partial_segment: false,
-        };
-        Self {
-            progress: 1.0,
-            path,
-            topology,
-        }
-    }
-
-    pub(super) fn restart_at(
-        &mut self,
-        geometry: &ProgressBorderGeometry,
-        start_progress: f32,
-        mesh: &mut Mesh,
-    ) -> f32 {
-        self.path = geometry.path_from(start_progress);
-        reset_progress_border_mesh(mesh, &self.path);
-        self.topology = VisibleBorderTopology {
-            complete_segments: self.path.samples.len() - 1,
-            has_partial_segment: false,
-        };
-        self.path.start_progress
-    }
-}
-
-impl ProgressBorderGeometry {
-    pub(super) fn new() -> Self {
-        let half_size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32) / 2.0;
-        let inner_outline = rounded_rectangle_outline(
-            half_size - Vec2::splat(TIP_OVERLAY_BORDER_WIDTH),
-            TIP_OVERLAY_CORNER_RADIUS - TIP_OVERLAY_BORDER_WIDTH,
-        );
-        let outer_half_size = half_size + Vec2::splat(TIP_OVERLAY_BORDER_WIDTH / 2.0);
-
-        let total_length = inner_outline
-            .windows(2)
-            .map(|points| border_center(points[0]).distance(border_center(points[1])))
-            .sum::<f32>();
-        let mut traversed = 0.0;
-        let mut samples = Vec::with_capacity(inner_outline.len());
-        samples.push(BorderSample {
-            progress: 0.0,
-            center: border_center(inner_outline[0]),
-            vertices: border_vertex_pair(inner_outline[0], outer_half_size),
-        });
-        for points in inner_outline.windows(2) {
-            let center = border_center(points[1]);
-            traversed += border_center(points[0]).distance(center);
-            samples.push(BorderSample {
-                progress: (traversed / total_length).min(1.0),
-                center,
-                vertices: border_vertex_pair(points[1], outer_half_size),
-            });
-        }
-        samples.last_mut().unwrap().progress = 1.0;
-
-        Self { samples }
-    }
-
-    pub(super) fn center_at(&self, progress: f32) -> Vec2 {
-        let (from, to, factor) = self.segment_at(progress);
-        from.center.lerp(to.center, factor)
-    }
-
-    pub(super) fn path_from(&self, start_progress: f32) -> ProgressBorderPath {
-        let start_progress = start_progress.rem_euclid(1.0);
-        let start_vertices = self.vertices_at(start_progress);
-        let mut samples = Vec::with_capacity(self.samples.len() + 1);
-        samples.push(BorderPathSample {
-            progress: 0.0,
-            vertices: start_vertices,
-        });
-
-        // Append the original cached samples in traversal order. Samples before
-        // the new start are moved behind the old `1.0` boundary.
-        let first_sample_after_start = self
-            .samples
-            .partition_point(|sample| sample.progress <= start_progress);
-        for sample in &self.samples[first_sample_after_start..] {
-            let relative_progress = sample.progress - start_progress;
-            if relative_progress < 1.0 {
-                samples.push(BorderPathSample {
-                    progress: relative_progress,
-                    vertices: sample.vertices,
-                });
-            }
-        }
-        for sample in self.samples.iter().skip(1) {
-            let relative_progress = 1.0 - start_progress + sample.progress;
-            if relative_progress >= 1.0 {
-                break;
-            }
-            samples.push(BorderPathSample {
-                progress: relative_progress,
-                vertices: sample.vertices,
-            });
-        }
-        samples.push(BorderPathSample {
-            progress: 1.0,
-            vertices: start_vertices,
-        });
-
-        let mut full_indices = Vec::with_capacity((samples.len() - 1) * 6);
-        for segment in 0..samples.len() - 1 {
-            push_border_segment_indices(&mut full_indices, segment as u32, segment as u32 + 1);
-        }
-
-        ProgressBorderPath {
-            start_progress,
-            samples,
-            full_indices,
-        }
-    }
-
-    fn vertices_at(&self, progress: f32) -> BorderVertexPair {
-        let (from, to, factor) = self.segment_at(progress);
-        from.vertices.lerp(to.vertices, factor)
-    }
-
-    fn segment_at(&self, progress: f32) -> (&BorderSample, &BorderSample, f32) {
-        let progress = progress.rem_euclid(1.0);
-        if progress == 0.0 {
-            let first = &self.samples[0];
-            return (first, first, 0.0);
-        }
-
-        let upper_index = self
-            .samples
-            .partition_point(|sample| sample.progress < progress);
-        let lower = &self.samples[upper_index - 1];
-        let upper = &self.samples[upper_index];
-        let factor = (progress - lower.progress) / (upper.progress - lower.progress);
-        (lower, upper, factor)
-    }
-}
-
-impl ProgressBorderPath {
-    fn slice_at(&self, progress: f32) -> VisibleBorderSlice {
-        let progress = progress.clamp(0.0, 1.0);
-        if progress == 0.0 {
-            return VisibleBorderSlice {
-                topology: VisibleBorderTopology {
-                    complete_segments: 0,
-                    has_partial_segment: false,
-                },
-                endpoint: None,
-            };
-        }
-        if progress == 1.0 {
-            return VisibleBorderSlice {
-                topology: VisibleBorderTopology {
-                    complete_segments: self.samples.len() - 1,
-                    has_partial_segment: false,
-                },
-                endpoint: None,
-            };
-        }
-
-        let upper_index = self
-            .samples
-            .partition_point(|sample| sample.progress < progress);
-        let lower_index = upper_index - 1;
-        let lower = self.samples[lower_index];
-        let upper = self.samples[upper_index];
-        let factor = (progress - lower.progress) / (upper.progress - lower.progress);
-        VisibleBorderSlice {
-            topology: VisibleBorderTopology {
-                complete_segments: lower_index,
-                has_partial_segment: true,
-            },
-            endpoint: Some(lower.vertices.lerp(upper.vertices, factor)),
-        }
-    }
-}
-
-pub(super) fn progress_border_mesh(path: &ProgressBorderPath) -> Mesh {
-    let mut positions = Vec::with_capacity(path.samples.len() * 2 + 2);
-    for sample in &path.samples {
-        push_border_vertices(&mut positions, sample.vertices);
-    }
-
-    // This final pair is a reusable endpoint for the one partially visible segment.
-    push_border_vertices(&mut positions, path.samples.last().unwrap().vertices);
-    triangle_mesh(positions, path.full_indices.clone())
-}
-
-pub(super) fn update_countdown_border(
+pub(super) fn update_countdown(
     time: Res<Time<Real>>,
     state: Res<ActiveJobState>,
-    border: Single<(&mut CountdownBorder, &Mesh2d)>,
-    shade: Single<&MeshMaterial2d<ColorMaterial>, With<CountdownBorderShade>>,
+    border: Single<(&mut BorderProgress, &Mesh2d)>,
+    mut label: Single<&mut Text, With<CountdownText>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
     let Some(active_job) = state.active_job.as_ref() else {
         return;
     };
-    let (mut border, border_mesh) = border.into_inner();
-    let progress = active_job.remaining_fraction_at(time.elapsed());
-    if progress == border.progress {
-        return;
-    }
-
-    border.progress = progress;
-    let darkening =
-        EaseFunction::CubicOut.sample_clamped(1.0 - progress) * TIP_OVERLAY_COUNTDOWN_DARKENING;
-    set_material_color(
-        &mut materials,
-        &shade.0,
-        Color::srgba(0.0, 0.0, 0.0, darkening),
-    );
-    let Some(mut mesh) = meshes.get_mut(&border_mesh.0) else {
-        return;
+    let (mut border, mesh_handle) = border.into_inner();
+    let (progress, caption) = match active_job.countdown_at(time.elapsed()) {
+        Some((remaining, total)) => {
+            let progress = if total.is_zero() {
+                0.0
+            } else {
+                (remaining.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0)
+            };
+            (progress, format!("{:.3}s", remaining.as_secs_f64()))
+        }
+        None => (1.0, "--".to_string()),
     };
-    let slice = border.path.slice_at(progress);
-    update_progress_border_mesh(&mut mesh, &border.path, border.topology, &slice);
-    border.topology = slice.topology;
-}
-
-fn reset_progress_border_mesh(mesh: &mut Mesh, path: &ProgressBorderPath) {
-    let Some(VertexAttributeValues::Float32x3(positions)) =
-        mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
-    else {
-        return;
-    };
-    positions.clear();
-    for sample in &path.samples {
-        push_border_vertices(positions, sample.vertices);
+    if label.0 != caption {
+        label.0 = caption;
     }
-    push_border_vertices(positions, path.samples.last().unwrap().vertices);
-
-    let Some(Indices::U32(indices)) = mesh.indices_mut() else {
-        return;
-    };
-    indices.clear();
-    indices.extend_from_slice(&path.full_indices);
-}
-
-fn update_progress_border_mesh(
-    mesh: &mut Mesh,
-    path: &ProgressBorderPath,
-    current_topology: VisibleBorderTopology,
-    slice: &VisibleBorderSlice,
-) {
-    if let Some(endpoint) = slice.endpoint
-        && let Some(VertexAttributeValues::Float32x3(positions)) =
-            mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
-    {
-        let endpoint_index = path.samples.len() * 2;
-        positions[endpoint_index] = endpoint.outer;
-        positions[endpoint_index + 1] = endpoint.inner;
+    if border.progress != progress {
+        border.progress = progress;
+        if let Some(mut mesh) = meshes.get_mut(&mesh_handle.0) {
+            *mesh = border.mesh();
+        }
     }
-
-    if slice.topology == current_topology {
-        return;
-    }
-
-    let Some(Indices::U32(indices)) = mesh.indices_mut() else {
-        return;
-    };
-    indices.clear();
-    let complete_index_count = slice.topology.complete_segments * 6;
-    indices.extend_from_slice(&path.full_indices[..complete_index_count]);
-    if slice.topology.has_partial_segment {
-        push_border_segment_indices(
-            indices,
-            slice.topology.complete_segments as u32,
-            path.samples.len() as u32,
-        );
-    }
-}
-
-fn border_center(inner: OutlinePoint) -> Vec2 {
-    inner.position + inner.outward * (TIP_OVERLAY_BORDER_WIDTH / 2.0)
-}
-
-fn border_vertex_pair(inner: OutlinePoint, outer_half_size: Vec2) -> BorderVertexPair {
-    // The final mask owns the outer rounded boundary. Extend each inner-outline
-    // sample to a rectangular envelope so this mesh only tessellates the inner curve.
-    let distance_to_vertical_edge = if inner.outward.x == 0.0 {
-        f32::INFINITY
-    } else {
-        (outer_half_size.x - inner.position.x.abs()) / inner.outward.x.abs()
-    };
-    let distance_to_horizontal_edge = if inner.outward.y == 0.0 {
-        f32::INFINITY
-    } else {
-        (outer_half_size.y - inner.position.y.abs()) / inner.outward.y.abs()
-    };
-    let outer =
-        inner.position + inner.outward * distance_to_vertical_edge.min(distance_to_horizontal_edge);
-    BorderVertexPair {
-        outer: [outer.x, outer.y, 0.0],
-        inner: [inner.position.x, inner.position.y, 0.0],
-    }
-}
-
-fn push_border_vertices(positions: &mut Vec<[f32; 3]>, vertices: BorderVertexPair) {
-    positions.extend_from_slice(&[vertices.outer, vertices.inner]);
-}
-
-fn push_border_segment_indices(indices: &mut Vec<u32>, from: u32, to: u32) {
-    let outer = from * 2;
-    let inner = outer + 1;
-    let next_outer = to * 2;
-    let next_inner = next_outer + 1;
-    indices.extend_from_slice(&[outer, inner, next_outer, inner, next_inner, next_outer]);
 }

@@ -3,31 +3,21 @@ use crate::{
     perception::PerceptionObserver,
 };
 use bevy::prelude::*;
-use rand::RngExt;
 use std::time::Duration;
 
 pub(crate) struct ActiveJob {
     pub(crate) current_index: usize,
-    pub(crate) preview_next_index: usize,
-    pub(crate) anim_ripple_rng_at: f32,
     pub(crate) started_at: Duration,
     ends_at: Option<Duration>,
 }
 
 impl ActiveJob {
-    fn elapsed_at(&self, now: Duration) -> Duration {
-        now.saturating_sub(self.started_at)
-    }
-
-    pub(crate) fn remaining_fraction_at(&self, now: Duration) -> f32 {
-        let Some(ends_at) = self.ends_at else {
-            return 1.0;
-        };
-        let duration = ends_at.saturating_sub(self.started_at).as_secs_f32();
-        if duration == 0.0 {
-            return 0.0;
-        }
-        (1.0 - self.elapsed_at(now).as_secs_f32() / duration).clamp(0.0, 1.0)
+    pub(crate) fn countdown_at(&self, now: Duration) -> Option<(Duration, Duration)> {
+        let ends_at = self.ends_at?;
+        Some((
+            ends_at.saturating_sub(now),
+            ends_at.saturating_sub(self.started_at),
+        ))
     }
 }
 
@@ -100,8 +90,7 @@ impl JobManager {
             if state.current_index() == Some(*index) {
                 return JobUpdate::Unchanged;
             }
-            let last_start = state.active_job.as_ref().map(|job| job.anim_ripple_rng_at);
-            return JobUpdate::Replace(Some(self.create_job(config, *index, now, last_start)));
+            return JobUpdate::Replace(Some(self.create_job(config, *index, now)));
         }
 
         if state.active_job.as_ref().is_some_and(|job| {
@@ -110,17 +99,16 @@ impl JobManager {
                 Job::ImagePerception { .. }
             )
         }) {
-            let last_start = state.active_job.as_ref().map(|job| job.anim_ripple_rng_at);
             let next = self
                 .select_next(config, now, None)
-                .map(|index| self.create_job(config, index, now, last_start));
+                .map(|index| self.create_job(config, index, now));
             return JobUpdate::Replace(next);
         }
 
         let Some(active_job) = state.active_job.as_ref() else {
             let next = self
                 .select_next(config, now, None)
-                .map(|index| self.create_job(config, index, now, None));
+                .map(|index| self.create_job(config, index, now));
             return if next.is_some() {
                 JobUpdate::Replace(next)
             } else {
@@ -137,36 +125,19 @@ impl JobManager {
         self.jobs[completed_index].finished_at = Some(now);
         let next = self
             .select_next(config, now, Some(completed_index))
-            .map(|index| self.create_job(config, index, now, Some(active_job.anim_ripple_rng_at)));
+            .map(|index| self.create_job(config, index, now));
         JobUpdate::Replace(next)
     }
 
-    fn create_job(
-        &self,
-        config: &JobConfig,
-        index: usize,
-        now: Duration,
-        last_anim_ripple_rng_at: Option<f32>,
-    ) -> ActiveJob {
+    fn create_job(&self, config: &JobConfig, index: usize, now: Duration) -> ActiveJob {
         let ends_at = match &config.0.jobs[index] {
             Job::Interval { show_time, .. } => Some(now.saturating_add(Duration::from_secs(
                 show_time.unwrap_or(crate::settings_default_values::DEFAULT_TIP_SHOW_TIME),
             ))),
             Job::ImagePerception { .. } => None,
         };
-        let preview_next_index = self
-            .select_next(config, ends_at.unwrap_or(now), Some(index))
-            .unwrap_or(index);
-        let mut rng = rand::rng();
-        let requested_start = match last_anim_ripple_rng_at {
-            // Keep both directions around the closed border at least a quarter lap apart.
-            Some(previous) => (previous + rng.random_range(0.25..0.75)).rem_euclid(1.0),
-            None => rng.random_range(0.0..1.0),
-        };
         ActiveJob {
             current_index: index,
-            preview_next_index,
-            anim_ripple_rng_at: requested_start,
             started_at: now,
             ends_at,
         }
@@ -247,15 +218,7 @@ mod tests {
     fn schedules_by_earliest_eligibility() {
         assert_schedule(
             &[(1, 3), (10, 3), (15, 3)],
-            &[
-                (0, 0, 1),
-                (3, 1, 2),
-                (6, 2, 0),
-                (9, 0, 0),
-                (12, 0, 0),
-                (15, 0, 1),
-                (18, 1, 0),
-            ],
+            &[(0, 0), (3, 1), (6, 2), (9, 0), (12, 0), (15, 0), (18, 1)],
         );
     }
 
@@ -264,12 +227,12 @@ mod tests {
         let mut scheduler = TestScheduler::new(&[(1, 3), (2, 3)]);
         assert!(scheduler.update_at(0));
         assert!(!scheduler.update_at(2));
-        assert_eq!(scheduler.active_indexes(), (0, 1));
+        assert_eq!(scheduler.active_index(), 0);
     }
 
     #[test]
     fn configuration_order_breaks_equal_interval_ties() {
-        assert_schedule(&[(5, 1), (5, 1), (5, 1)], &[(0, 0, 1), (1, 1, 2)]);
+        assert_schedule(&[(5, 1), (5, 1), (5, 1)], &[(0, 0), (1, 1)]);
     }
 
     #[test]
@@ -312,13 +275,13 @@ mod tests {
         }
     }
 
-    fn assert_schedule(job_times: &[(u64, u64)], expected: &[(u64, usize, usize)]) {
+    fn assert_schedule(job_times: &[(u64, u64)], expected: &[(u64, usize)]) {
         let mut scheduler = TestScheduler::new(job_times);
-        for &(time, current_index, preview_next_index) in expected {
+        for &(time, current_index) in expected {
             assert!(scheduler.update_at(time));
             assert_eq!(
-                scheduler.active_indexes(),
-                (current_index, preview_next_index),
+                scheduler.active_index(),
+                current_index,
                 "unexpected schedule at {time}s"
             );
         }
@@ -339,6 +302,7 @@ mod tests {
                     tip: Tip {
                         text: format!("job {index}"),
                         color: None,
+                        icon: None,
                         reaction: None,
                     },
                     interval,
@@ -367,9 +331,8 @@ mod tests {
             }
         }
 
-        fn active_indexes(&self) -> (usize, usize) {
-            let active_job = self.state.active_job.as_ref().unwrap();
-            (active_job.current_index, active_job.preview_next_index)
+        fn active_index(&self) -> usize {
+            self.state.active_job.as_ref().unwrap().current_index
         }
     }
 }

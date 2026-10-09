@@ -131,8 +131,7 @@ impl PerceptionObserver {
                 })?
                 .into_rgba8();
             let region = config.target.region();
-            if template.width() != region.width || template.height() != region.height
-            {
+            if template.width() != region.width || template.height() != region.height {
                 return Err(format!(
                     "Template size does not match the region in {}",
                     path.display()
@@ -260,7 +259,10 @@ fn watch_tip_conditions(
 }
 
 #[cfg(target_os = "windows")]
-pub fn record_condition(condition_path: &Path, record_target: RecordTarget<'_>) -> Result<(), String> {
+pub fn record_condition(
+    condition_path: &Path,
+    record_target: RecordTarget<'_>,
+) -> Result<(), String> {
     if condition_path
         .extension()
         .is_none_or(|extension| extension != "json")
@@ -328,8 +330,16 @@ pub fn record_condition(condition_path: &Path, record_target: RecordTarget<'_>) 
                             <= i64::from(window.y) + i64::from(window.height)
                 })
                 .ok_or("No window contains the selected region; use --screen for an absolute screen region")?;
-            if windows.iter().filter(|candidate| candidate.title == window.title).count() > 1 {
-                return Err(format!("Multiple windows have the same title: {}", window.title));
+            if windows
+                .iter()
+                .filter(|candidate| candidate.title == window.title)
+                .count()
+                > 1
+            {
+                return Err(format!(
+                    "Multiple windows have the same title: {}",
+                    window.title
+                ));
             }
             Some(window)
         }
@@ -442,7 +452,10 @@ pub fn record_condition(condition_path: &Path, record_target: RecordTarget<'_>) 
 }
 
 #[cfg(not(target_os = "windows"))]
-pub fn record_condition(_condition_path: &Path, _record_target: RecordTarget<'_>) -> Result<(), String> {
+pub fn record_condition(
+    _condition_path: &Path,
+    _record_target: RecordTarget<'_>,
+) -> Result<(), String> {
     Err("Perception recording currently requires Windows".into())
 }
 
@@ -516,9 +529,9 @@ pub fn watch_condition(condition_path: &Path) -> Result<(), String> {
                     condition.threshold
                 );
             }
-            Ok(None) => println!(
-                "[Perception] sample={sample} state=NOT_MATCHED window is not focused"
-            ),
+            Ok(None) => {
+                println!("[Perception] sample={sample} state=NOT_MATCHED window is not focused")
+            }
             Err(error) => {
                 eprintln!("[Perception] sample={sample} state=UNKNOWN capture failed: {error}")
             }
@@ -635,17 +648,16 @@ fn capture_target(target: &CaptureTarget) -> Result<Option<xcap::image::RgbaImag
             let height = window.height().map_err(|error| error.to_string())?;
             validate_region(*region, width, height)?;
 
-            let x = i64::from(window.x().map_err(|error| error.to_string())?)
-                + i64::from(region.x);
-            let y = i64::from(window.y().map_err(|error| error.to_string())?)
-                + i64::from(region.y);
+            let x = i64::from(window.x().map_err(|error| error.to_string())?) + i64::from(region.x);
+            let y = i64::from(window.y().map_err(|error| error.to_string())?) + i64::from(region.y);
             let monitors = xcap::Monitor::all()
                 .map_err(|error| format!("Unable to enumerate monitors: {error}"))?;
             for monitor in monitors {
                 let monitor_x = i64::from(monitor.x().map_err(|error| error.to_string())?);
                 let monitor_y = i64::from(monitor.y().map_err(|error| error.to_string())?);
                 let monitor_width = i64::from(monitor.width().map_err(|error| error.to_string())?);
-                let monitor_height = i64::from(monitor.height().map_err(|error| error.to_string())?);
+                let monitor_height =
+                    i64::from(monitor.height().map_err(|error| error.to_string())?);
                 let local_x = x - monitor_x;
                 let local_y = y - monitor_y;
                 if local_x >= 0
@@ -654,12 +666,7 @@ fn capture_target(target: &CaptureTarget) -> Result<Option<xcap::image::RgbaImag
                     && local_y + i64::from(region.height) <= monitor_height
                 {
                     let frame = monitor
-                        .capture_region(
-                            local_x as u32,
-                            local_y as u32,
-                            region.width,
-                            region.height,
-                        )
+                        .capture_region(local_x as u32, local_y as u32, region.width, region.height)
                         .map_err(|error| error.to_string())?;
                     return if window.is_focused().map_err(|error| error.to_string())? {
                         Ok(Some(frame))
@@ -668,7 +675,9 @@ fn capture_target(target: &CaptureTarget) -> Result<Option<xcap::image::RgbaImag
                     };
                 }
             }
-            Err(format!("Window region is not fully visible on one monitor: {title}"))
+            Err(format!(
+                "Window region is not fully visible on one monitor: {title}"
+            ))
         }
     }
 }
@@ -682,12 +691,14 @@ fn window_is_focused(title: &str) -> bool {
 
 #[cfg(target_os = "windows")]
 fn window_by_title(title: &str) -> Result<xcap::Window, String> {
-    let windows = xcap::Window::all()
-        .map_err(|error| format!("Unable to enumerate windows: {error}"))?;
+    let windows =
+        xcap::Window::all().map_err(|error| format!("Unable to enumerate windows: {error}"))?;
     let mut matches = windows
         .into_iter()
         .filter(|window| window.title().is_ok_and(|candidate| candidate == title));
-    let window = matches.next().ok_or_else(|| format!("Window not found: {title}"))?;
+    let window = matches
+        .next()
+        .ok_or_else(|| format!("Window not found: {title}"))?;
     if matches.next().is_some() {
         return Err(format!("Multiple windows have the same title: {title}"));
     }

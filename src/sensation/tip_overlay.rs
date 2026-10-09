@@ -1,39 +1,33 @@
 mod geometry;
 mod progress_border;
-mod ripple;
 mod style;
 mod text_scroll;
-mod transition;
 mod view;
+mod visual_config;
 
 use self::{
-    progress_border::update_countdown_border,
-    ripple::animate_ripple,
-    style::RoundedRectangleMaskMaterial,
+    progress_border::update_countdown,
     text_scroll::animate_tip_text,
-    transition::begin_tip_transition,
-    view::{drag_overlay, setup_overlay, sync_overlay_visibility, sync_tip_colors, sync_tip_text},
+    view::{
+        drag_overlay, setup_overlay, sync_icon_placeholder, sync_notice, sync_overlay_visibility,
+    },
+    visual_config::RotationNoticeVisualConfig,
 };
 use crate::controller::{ActiveJobState, JobProcessing};
-use bevy::{prelude::*, sprite_render::Material2dPlugin};
+use bevy::prelude::*;
 
 pub(super) fn configure(app: &mut App) {
-    app.add_plugins(Material2dPlugin::<RoundedRectangleMaskMaterial>::default())
+    app.insert_resource(RotationNoticeVisualConfig::load())
         .add_systems(Startup, setup_overlay)
         .add_systems(
             Update,
             (
-                (
-                    sync_overlay_visibility,
-                    sync_tip_text,
-                    sync_tip_colors,
-                    begin_tip_transition,
-                )
+                (sync_overlay_visibility, sync_notice)
                     .chain()
                     .run_if(resource_changed::<ActiveJobState>),
-                animate_ripple,
+                update_countdown,
+                sync_icon_placeholder,
                 animate_tip_text,
-                update_countdown_border,
             )
                 .chain()
                 .after(JobProcessing),

@@ -1,216 +1,315 @@
 use super::{
-    progress_border::{
-        CountdownBorder, CountdownBorderShade, ProgressBorderGeometry, ProgressBorderPath,
-        progress_border_mesh,
-    },
-    ripple::{Ripple, ripple_mesh},
-    style::{
-        RoundedRectangleMaskMaterial, color_with_alpha, overlay_color_material,
-        rounded_rectangle_mask_material, set_material_color, tip_background_color, tip_color,
-    },
+    geometry::{BorderGeometry, icon_marker_mesh},
+    progress_border::{BorderProgress, CountdownText},
+    style::{base_color, color_material, set_material_color, tip_color},
     text_scroll::{TextScroll, TipTextViewport},
+    visual_config::{
+        LayerSizing, RotationNoticeVisualConfig, layer_color, layer_image, layer_sprite,
+    },
 };
 use crate::{
     controller::ActiveJobState,
     job::JobConfig,
     settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH},
 };
-use bevy::{prelude::*, text::FontSourceTemplate, window::PrimaryWindow};
+use bevy::{
+    prelude::*,
+    sprite::{SpriteImageMode, SpriteScalingMode},
+    text::FontSource,
+    window::PrimaryWindow,
+};
 
-const COLOR_MAIN_TIP_TEXT: Color = Color::srgb(0.94, 0.96, 1.0);
+const ICON_CENTER_X: f32 = -(WINDOW_WIDTH as f32) / 2.0 + 20.0;
+const ICON_SIZE: Vec2 = Vec2::splat(26.0);
+const CONTENT_COLOR: Color = Color::srgb(0.94, 0.96, 1.0);
 
-#[derive(Component, Default, Clone)]
-pub(super) struct TipOverlay;
-
-#[derive(Component, Default, Clone)]
+#[derive(Component)]
 pub(super) struct TipText;
-
-#[derive(Component, Default, Clone)]
-pub(super) struct TipBackground;
-
-#[derive(Component, Default, Clone)]
-pub(super) struct PlayedBorder;
-
-struct OverlaySceneAssets {
-    background_mesh: Handle<Mesh>,
-    background_material: Handle<ColorMaterial>,
-    ripple_mesh: Handle<Mesh>,
-    ripple_material: Handle<ColorMaterial>,
-    played_mesh: Handle<Mesh>,
-    played_material: Handle<ColorMaterial>,
-    countdown_mesh: Handle<Mesh>,
-    countdown_material: Handle<ColorMaterial>,
-    shade_material: Handle<ColorMaterial>,
-    mask_mesh: Handle<Mesh>,
-    mask_material: Handle<RoundedRectangleMaskMaterial>,
+#[derive(Component)]
+pub(super) struct BaseFallback;
+#[derive(Component)]
+pub(super) struct IconFallback;
+#[derive(Component)]
+pub(super) struct IconMarker;
+#[derive(Component)]
+pub(super) struct BaseArt;
+#[derive(Component)]
+pub(super) struct IconBackgroundArt;
+#[derive(Component, Default)]
+pub(super) struct IconArt {
+    has_source: bool,
 }
+#[derive(Component)]
+pub(super) struct CountdownBackground;
 
 pub(super) fn setup_overlay(
     mut commands: Commands,
-    tips: Res<JobConfig>,
+    jobs: Res<JobConfig>,
+    visuals: Res<RotationNoticeVisualConfig>,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut color_materials: ResMut<Assets<ColorMaterial>>,
-    mut mask_materials: ResMut<Assets<RoundedRectangleMaskMaterial>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    let current_color = tip_color(&tips, 0);
-    let next_index = 1 % tips.0.jobs.len();
-    let next_color = tip_color(&tips, next_index);
-    let size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32);
-    // A ripple can originate on the overlay boundary and grow far enough to
-    // reach the opposite corner. Cover that entire possible geometry so the
-    // final destination-mask pass also clears fragments outside the overlay.
-    let mask_size = size + Vec2::splat(size.length() * 2.0);
-    let background_material =
-        color_materials.add(overlay_color_material(tip_background_color(current_color)));
-    let background_mesh = meshes.add(Rectangle::new(size.x, size.y));
-
-    let ripple = Ripple::new(0);
-    let ripple_mesh = meshes.add(ripple_mesh(&ripple));
-    let ripple_material =
-        color_materials.add(overlay_color_material(color_with_alpha(current_color, 0.0)));
-
-    let border_geometry = ProgressBorderGeometry::new();
-    let border_path = border_geometry.path_from(0.0);
-    let played_mesh = meshes.add(progress_border_mesh(&border_path));
-    let countdown_mesh = meshes.add(progress_border_mesh(&border_path));
-    let scene_assets = OverlaySceneAssets {
-        background_mesh,
-        background_material,
-        ripple_mesh,
-        ripple_material,
-        played_mesh,
-        played_material: color_materials.add(overlay_color_material(next_color)),
-        countdown_mesh,
-        countdown_material: color_materials.add(overlay_color_material(current_color)),
-        shade_material: color_materials
-            .add(overlay_color_material(Color::srgba(0.0, 0.0, 0.0, 0.0))),
-        mask_mesh: meshes.add(Rectangle::new(mask_size.x, mask_size.y)),
-        mask_material: mask_materials.add(rounded_rectangle_mask_material()),
+    let theme = tip_color(&jobs, 0);
+    let border_width = if visuals.border_width.is_finite()
+        && visuals.border_width > 0.0
+        && visuals.border_width < WINDOW_HEIGHT as f32 / 4.0
+    {
+        visuals.border_width
+    } else {
+        eprintln!("[Sensation] Invalid border width; using 2 pixels");
+        2.0
     };
-    let current_tip = tips.0.jobs[0].tip().text.replace(['\r', '\n'], " ");
+    let geometry = BorderGeometry::load(visuals.border_path.as_deref(), border_width);
+    let fill_mesh = meshes.add(geometry.fill_mesh());
+    let marker_mesh = meshes.add(icon_marker_mesh());
+    let border = BorderProgress::new(geometry);
+    let border_mesh = meshes.add(border.mesh());
+    let base_material = materials.add(color_material(base_color(
+        theme,
+        visuals.background_opacity,
+    )));
+    let marker_material = materials.add(color_material(theme));
+    let border_material = materials.add(color_material(theme));
 
-    commands.spawn_scene_list(overlay_scene(scene_assets, current_tip, border_path));
-    commands.insert_resource(border_geometry);
-}
+    commands.spawn(Camera2d);
+    commands.spawn((
+        Mesh2d(fill_mesh),
+        MeshMaterial2d(base_material),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        BaseFallback,
+    ));
+    let mut base_art = layer_sprite(
+        &asset_server,
+        visuals.base_background.as_ref(),
+        Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32),
+    );
+    base_art.color = layer_color(
+        visuals.base_background.as_ref(),
+        theme,
+        visuals.background_opacity,
+    );
+    commands.spawn((base_art, Transform::from_xyz(0.0, 0.0, 0.1), BaseArt));
 
-fn overlay_scene(
-    assets: OverlaySceneAssets,
-    current_tip: String,
-    countdown_path: ProgressBorderPath,
-) -> impl SceneList {
-    let OverlaySceneAssets {
-        background_mesh,
-        background_material,
-        ripple_mesh,
-        ripple_material,
-        played_mesh,
-        played_material,
-        countdown_mesh,
-        countdown_material,
-        shade_material,
-        mask_mesh,
-        mask_material,
-    } = assets;
-    // Sharing this handle keeps the shade aligned with the shrinking countdown mesh.
-    let shade_mesh = countdown_mesh.clone();
+    commands.spawn((
+        Sprite::from_color(
+            icon_background_color(theme, visuals.background_opacity),
+            ICON_SIZE,
+        ),
+        Transform::from_xyz(ICON_CENTER_X, 0.0, 0.3),
+        IconFallback,
+    ));
+    let mut icon_background =
+        layer_sprite(&asset_server, visuals.icon_background.as_ref(), ICON_SIZE);
+    icon_background.color = layer_color(
+        visuals.icon_background.as_ref(),
+        theme,
+        visuals.background_opacity,
+    );
+    commands.spawn((
+        icon_background,
+        Transform::from_xyz(ICON_CENTER_X, 0.0, 0.4),
+        IconBackgroundArt,
+    ));
+    commands.spawn((
+        Mesh2d(marker_mesh),
+        MeshMaterial2d(marker_material),
+        Transform::from_xyz(ICON_CENTER_X, 0.0, 0.7),
+        IconMarker,
+    ));
+    commands.spawn((
+        Sprite::from_color(Color::NONE, Vec2::splat(14.0)),
+        Transform::from_xyz(ICON_CENTER_X, 0.0, 0.8),
+        IconArt::default(),
+    ));
+    commands.spawn((
+        Mesh2d(border_mesh),
+        MeshMaterial2d(border_material),
+        Transform::from_xyz(0.0, 0.0, 2.0),
+        border,
+    ));
 
-    bsn_list![
-        Camera2d,
-        (
-            Mesh2d(background_mesh)
-            MeshMaterial2d::<ColorMaterial>(background_material)
-            Transform::from_xyz(0.0, 0.0, 0.0)
-            TipBackground
-            TipOverlay
-        ),
-        (
-            Mesh2d(ripple_mesh)
-            MeshMaterial2d::<ColorMaterial>(ripple_material)
-            Transform::from_xyz(0.0, 0.0, 0.5)
-            template(|_| Ok(Ripple::new(0)))
-            TipOverlay
-        ),
-        (
-            Mesh2d(played_mesh)
-            MeshMaterial2d::<ColorMaterial>(played_material)
-            Transform::from_xyz(0.0, 0.0, 1.0)
-            PlayedBorder
-            TipOverlay
-        ),
-        (
-            Mesh2d(countdown_mesh)
-            MeshMaterial2d::<ColorMaterial>(countdown_material)
-            Transform::from_xyz(0.0, 0.0, 2.0)
-            template(move |_| Ok(CountdownBorder::new(countdown_path.clone())))
-            TipOverlay
-        ),
-        (
-            Mesh2d(shade_mesh)
-            MeshMaterial2d::<ColorMaterial>(shade_material)
-            Transform::from_xyz(0.0, 0.0, 2.1)
-            CountdownBorderShade
-            TipOverlay
-        ),
-        (
-            Mesh2d(mask_mesh)
-            MeshMaterial2d::<RoundedRectangleMaskMaterial>(mask_material)
-            Transform::from_xyz(0.0, 0.0, 3.0)
-            TipOverlay
-        ),
-        (
-            Node {
-                width: percent(100),
-                height: percent(100),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-            }
-            TipOverlay
-            Children [
-                (
-                    Node {
-                        width: px(136),
-                        height: percent(100),
-                        align_items: AlignItems::Center,
-                        overflow: Overflow::clip(),
-                    }
-                    TipTextViewport
-                    Children [
-                        (
-                            Text(current_tip)
+    let current_tip = jobs.0.jobs[0].tip().text.replace(['\r', '\n'], " ");
+    let countdown_art = layer_image(&asset_server, visuals.countdown_background.as_ref());
+    let countdown_stretches = visuals
+        .countdown_background
+        .as_ref()
+        .is_some_and(|asset| !matches!(asset.sizing, LayerSizing::Original));
+    let countdown_size = if countdown_stretches {
+        percent(100)
+    } else {
+        Val::Auto
+    };
+    commands
+        .spawn(Node {
+            width: percent(100),
+            height: percent(100),
+            justify_content: JustifyContent::Center,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|root| {
+            root.spawn(Node {
+                width: px(WINDOW_WIDTH),
+                height: px(WINDOW_HEIGHT),
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|board| {
+                board
+                    .spawn((
+                        Node {
+                            position_type: PositionType::Absolute,
+                            left: px(40),
+                            top: px(4),
+                            width: px(112),
+                            height: px(20),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::FlexStart,
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        TipTextViewport,
+                    ))
+                    .with_children(|viewport| {
+                        viewport.spawn((
+                            Text(current_tip),
                             TextFont {
-                                font: FontSourceTemplate::SystemUi,
-                                font_size: FontSize::Px(17.0),
-                            }
-                            TextColor(COLOR_MAIN_TIP_TEXT)
-                            template_value(TextLayout::no_wrap())
+                                font: FontSource::SystemUi,
+                                font_size: FontSize::Px(13.0),
+                                ..default()
+                            },
+                            TextColor(CONTENT_COLOR),
+                            TextLayout::no_wrap(),
                             Node {
                                 flex_shrink: 0.0,
-                                margin: UiRect::horizontal(Val::Auto),
-                            }
-                            TextScroll
-                            TipText
-                        )
-                    ]
-                )
-            ]
-        )
-    ]
+                                ..default()
+                            },
+                            TextScroll::default(),
+                            TipText,
+                        ));
+                    });
+                board
+                    .spawn(Node {
+                        position_type: PositionType::Absolute,
+                        right: px(8),
+                        bottom: px(3),
+                        padding: UiRect::axes(px(3), px(1)),
+                        ..default()
+                    })
+                    .with_children(|countdown| {
+                        countdown.spawn((
+                            countdown_art,
+                            Node {
+                                position_type: PositionType::Absolute,
+                                right: px(0),
+                                bottom: px(0),
+                                width: countdown_size,
+                                height: countdown_size,
+                                ..default()
+                            },
+                            CountdownBackground,
+                        ));
+                        countdown.spawn((
+                            Text("--".into()),
+                            TextFont {
+                                font: FontSource::SystemUi,
+                                font_size: FontSize::Px(10.0),
+                                ..default()
+                            },
+                            TextColor(theme),
+                            CountdownText,
+                        ));
+                    });
+            });
+        });
 }
 
-pub(super) fn sync_tip_text(
+fn icon_background_color(theme: Color, opacity: f32) -> Color {
+    let theme = theme.to_srgba();
+    Color::srgba(
+        theme.red * 0.15,
+        theme.green * 0.15,
+        theme.blue * 0.15,
+        (opacity * 0.75).clamp(0.0, 1.0),
+    )
+}
+
+pub(super) fn sync_notice(
     jobs: Res<JobConfig>,
     state: Res<ActiveJobState>,
+    visuals: Res<RotationNoticeVisualConfig>,
+    asset_server: Res<AssetServer>,
     mut text: Single<&mut Text, With<TipText>>,
+    mut countdown_color: Single<&mut TextColor, With<CountdownText>>,
+    mut countdown_art: Single<&mut ImageNode, With<CountdownBackground>>,
+    mut sprites: Query<(
+        &mut Sprite,
+        Option<&BaseArt>,
+        Option<&IconFallback>,
+        Option<&IconBackgroundArt>,
+        Option<&mut IconArt>,
+    )>,
+    materials_query: Query<(
+        &MeshMaterial2d<ColorMaterial>,
+        Option<&BaseFallback>,
+        Option<&IconMarker>,
+        Option<&BorderProgress>,
+    )>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    let Some(active_job) = state.active_job.as_ref() else {
+    let Some(active) = state.active_job.as_ref() else {
         return;
     };
-    let Some(job) = jobs.0.jobs.get(active_job.current_index) else {
-        return;
-    };
-    let content = job.tip().text.replace(['\r', '\n'], " ");
+    let tip = jobs.0.jobs[active.current_index].tip();
+    let theme = tip_color(&jobs, active.current_index);
+    let content = tip.text.replace(['\r', '\n'], " ");
     if text.0 != content {
         text.0 = content;
+    }
+    countdown_color.0 = theme;
+    countdown_art.color = layer_color(
+        visuals.countdown_background.as_ref(),
+        theme,
+        visuals.background_opacity,
+    );
+    for (mut sprite, base_art, icon_fallback, icon_background, icon_art) in &mut sprites {
+        if base_art.is_some() {
+            sprite.color = layer_color(
+                visuals.base_background.as_ref(),
+                theme,
+                visuals.background_opacity,
+            );
+        } else if icon_fallback.is_some() {
+            sprite.color = icon_background_color(theme, visuals.background_opacity);
+        } else if icon_background.is_some() {
+            sprite.color = layer_color(
+                visuals.icon_background.as_ref(),
+                theme,
+                visuals.background_opacity,
+            );
+        } else if let Some(mut icon_art) = icon_art {
+            let icon_path = tip.icon.as_deref().filter(|path| !path.trim().is_empty());
+            icon_art.has_source = icon_path.is_some();
+            if let Some(path) = icon_path {
+                sprite.image = asset_server.load(path.to_owned());
+                sprite.color = theme;
+                sprite.custom_size = Some(Vec2::splat(14.0));
+                sprite.image_mode = SpriteImageMode::Scale(SpriteScalingMode::FitCenter);
+            } else {
+                sprite.color = Color::NONE;
+            }
+        }
+    }
+    for (handle, base, marker, border) in &materials_query {
+        let color = if base.is_some() {
+            base_color(theme, visuals.background_opacity)
+        } else if marker.is_some() || border.is_some() {
+            theme
+        } else {
+            continue;
+        };
+        set_material_color(&mut materials, &handle.0, color);
     }
 }
 
@@ -221,27 +320,17 @@ pub(super) fn sync_overlay_visibility(
     window.visible = state.active_job.is_some();
 }
 
-pub(super) fn sync_tip_colors(
-    jobs: Res<JobConfig>,
-    state: Res<ActiveJobState>,
-    played: Single<&MeshMaterial2d<ColorMaterial>, With<PlayedBorder>>,
-    countdown: Single<&MeshMaterial2d<ColorMaterial>, With<CountdownBorder>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+pub(super) fn sync_icon_placeholder(
+    image: Single<(&Sprite, &IconArt)>,
+    images: Res<Assets<Image>>,
+    marker: Single<&mut Visibility, With<IconMarker>>,
 ) {
-    let Some(active_job) = state.active_job.as_ref() else {
-        return;
+    let (sprite, icon) = image.into_inner();
+    *marker.into_inner() = if icon.has_source && images.get(&sprite.image).is_some() {
+        Visibility::Hidden
+    } else {
+        Visibility::Visible
     };
-
-    set_material_color(
-        &mut materials,
-        &played.0,
-        tip_color(&jobs, active_job.preview_next_index),
-    );
-    set_material_color(
-        &mut materials,
-        &countdown.0,
-        tip_color(&jobs, active_job.current_index),
-    );
 }
 
 pub(super) fn drag_overlay(

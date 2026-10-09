@@ -1,0 +1,8 @@
+{
+  "baseBackground": null,
+  "iconBackground": null,
+  "countdownBackground": null,
+  "borderPath": "sensation/rotation_notice_border.json",
+  "borderWidth": 2,
+  "backgroundOpacity": 0.72
+}

@@ -11,6 +11,8 @@ pub type JobTick = u64;
 pub struct Tip {
     pub text: String,
     pub color: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
     pub reaction: Option<TipReaction>,
 }
 

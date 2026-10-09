@@ -23,7 +23,7 @@ use bevy::{
         RenderPlugin,
         settings::{Backends, WgpuSettings},
     },
-    window::{CompositeAlphaMode, WindowLevel, WindowResolution},
+    window::{CompositeAlphaMode, WindowLevel, WindowResizeConstraints, WindowResolution},
 };
 
 #[derive(serde::Deserialize)]
@@ -66,9 +66,7 @@ fn launch() -> Result<(), String> {
                     perception::RecordTarget::AutoWindow,
                 );
             }
-            "--perception-record"
-                if raw_args.len() == 4 && raw_args[2] == "--window-title" =>
-            {
+            "--perception-record" if raw_args.len() == 4 && raw_args[2] == "--window-title" => {
                 let title = raw_args[3]
                     .to_str()
                     .ok_or("--window-title must be valid UTF-8")?;
@@ -290,6 +288,11 @@ fn run(
                     primary_window: Some(Window {
                         title: "Nyra".into(),
                         resolution: WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT),
+                        resize_constraints: WindowResizeConstraints {
+                            min_width: WINDOW_WIDTH as f32,
+                            min_height: WINDOW_HEIGHT as f32,
+                            ..default()
+                        },
                         decorations: false,
                         transparent: true,
                         composite_alpha_mode: CompositeAlphaMode::PreMultiplied,
