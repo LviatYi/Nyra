@@ -1,6 +1,6 @@
 use super::{
     geometry::{BorderGeometry, icon_marker_mesh},
-    progress_border::{BorderProgress, CountdownText},
+    progress_border::{BorderHead, BorderHeadGlow, BorderProgress, CountdownText},
     style::{base_color, color_material, set_material_color, tip_color},
     text_scroll::{TextScroll, TipTextViewport},
     visual_config::{
@@ -16,12 +16,25 @@ use bevy::{
     prelude::*,
     sprite::{SpriteImageMode, SpriteScalingMode},
     text::FontSource,
-    window::PrimaryWindow,
+    window::{CursorOptions, PrimaryWindow, WindowPosition},
 };
 
 const ICON_CENTER_X: f32 = -(WINDOW_WIDTH as f32) / 2.0 + 20.0;
 const ICON_SIZE: Vec2 = Vec2::splat(26.0);
 const CONTENT_COLOR: Color = Color::srgb(0.94, 0.96, 1.0);
+const HEAD_GLOW_RADIUS: f32 = 4.5;
+
+#[derive(Resource, Default)]
+pub(super) struct NoticePlacement {
+    center: Option<Vec2>,
+    canvas_size: Option<Vec2>,
+    drag_offset: Option<Vec2>,
+}
+
+#[derive(Component)]
+pub(super) struct NoticeWorldRoot;
+#[derive(Component)]
+pub(super) struct NoticeUiBoard;
 
 #[derive(Component)]
 pub(super) struct TipText;
@@ -65,19 +78,31 @@ pub(super) fn setup_overlay(
     let marker_mesh = meshes.add(icon_marker_mesh());
     let border = BorderProgress::new(geometry);
     let border_mesh = meshes.add(border.mesh());
+    let head_position = border.head_position().unwrap_or(Vec2::ZERO);
+    let outer_glow_mesh = meshes.add(Circle::new(HEAD_GLOW_RADIUS));
+    let inner_glow_mesh = meshes.add(Circle::new(3.0));
+    let head_core_mesh = meshes.add(Circle::new(1.5));
     let base_material = materials.add(color_material(base_color(
         theme,
         visuals.background_opacity,
     )));
     let marker_material = materials.add(color_material(theme));
     let border_material = materials.add(color_material(theme));
+    let outer_glow_material = materials.add(color_material(theme.with_alpha(0.16)));
+    let inner_glow_material = materials.add(color_material(theme.with_alpha(0.4)));
+    let head_core_material = materials.add(color_material(Color::srgba(1.0, 1.0, 1.0, 0.95)));
 
     commands.spawn(Camera2d);
+    commands.insert_resource(NoticePlacement::default());
+    let notice_root = commands
+        .spawn((Transform::default(), Visibility::default(), NoticeWorldRoot))
+        .id();
     commands.spawn((
         Mesh2d(fill_mesh),
         MeshMaterial2d(base_material),
         Transform::from_xyz(0.0, 0.0, 0.0),
         BaseFallback,
+        ChildOf(notice_root),
     ));
     let mut base_art = layer_sprite(
         &asset_server,
@@ -89,7 +114,12 @@ pub(super) fn setup_overlay(
         theme,
         visuals.background_opacity,
     );
-    commands.spawn((base_art, Transform::from_xyz(0.0, 0.0, 0.1), BaseArt));
+    commands.spawn((
+        base_art,
+        Transform::from_xyz(0.0, 0.0, 0.1),
+        BaseArt,
+        ChildOf(notice_root),
+    ));
 
     commands.spawn((
         Sprite::from_color(
@@ -98,6 +128,7 @@ pub(super) fn setup_overlay(
         ),
         Transform::from_xyz(ICON_CENTER_X, 0.0, 0.3),
         IconFallback,
+        ChildOf(notice_root),
     ));
     let mut icon_background =
         layer_sprite(&asset_server, visuals.icon_background.as_ref(), ICON_SIZE);
@@ -110,24 +141,54 @@ pub(super) fn setup_overlay(
         icon_background,
         Transform::from_xyz(ICON_CENTER_X, 0.0, 0.4),
         IconBackgroundArt,
+        ChildOf(notice_root),
     ));
     commands.spawn((
         Mesh2d(marker_mesh),
         MeshMaterial2d(marker_material),
         Transform::from_xyz(ICON_CENTER_X, 0.0, 0.7),
         IconMarker,
+        ChildOf(notice_root),
     ));
     commands.spawn((
         Sprite::from_color(Color::NONE, Vec2::splat(14.0)),
         Transform::from_xyz(ICON_CENTER_X, 0.0, 0.8),
         IconArt::default(),
+        ChildOf(notice_root),
     ));
     commands.spawn((
         Mesh2d(border_mesh),
         MeshMaterial2d(border_material),
         Transform::from_xyz(0.0, 0.0, 2.0),
         border,
+        ChildOf(notice_root),
     ));
+    commands
+        .spawn((
+            Transform::from_xyz(head_position.x, head_position.y, 2.1),
+            Visibility::Visible,
+            BorderHead,
+            ChildOf(notice_root),
+        ))
+        .with_children(|head| {
+            head.spawn((
+                Mesh2d(outer_glow_mesh),
+                MeshMaterial2d(outer_glow_material),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+                BorderHeadGlow(0.16),
+            ));
+            head.spawn((
+                Mesh2d(inner_glow_mesh),
+                MeshMaterial2d(inner_glow_material),
+                Transform::from_xyz(0.0, 0.0, 0.1),
+                BorderHeadGlow(0.4),
+            ));
+            head.spawn((
+                Mesh2d(head_core_mesh),
+                MeshMaterial2d(head_core_material),
+                Transform::from_xyz(0.0, 0.0, 0.2),
+            ));
+        });
 
     let current_tip = jobs.0.jobs[0].tip().text.replace(['\r', '\n'], " ");
     let countdown_art = layer_image(&asset_server, visuals.countdown_background.as_ref());
@@ -144,17 +205,18 @@ pub(super) fn setup_overlay(
         .spawn(Node {
             width: percent(100),
             height: percent(100),
-            justify_content: JustifyContent::Center,
-            align_items: AlignItems::Center,
             ..default()
         })
         .with_children(|root| {
-            root.spawn(Node {
-                width: px(WINDOW_WIDTH),
-                height: px(WINDOW_HEIGHT),
-                flex_shrink: 0.0,
-                ..default()
-            })
+            root.spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: px(WINDOW_WIDTH),
+                    height: px(WINDOW_HEIGHT),
+                    ..default()
+                },
+                NoticeUiBoard,
+            ))
             .with_children(|board| {
                 board
                     .spawn((
@@ -255,6 +317,7 @@ pub(super) fn sync_notice(
         Option<&BaseFallback>,
         Option<&IconMarker>,
         Option<&BorderProgress>,
+        Option<&BorderHeadGlow>,
     )>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
@@ -301,11 +364,13 @@ pub(super) fn sync_notice(
             }
         }
     }
-    for (handle, base, marker, border) in &materials_query {
+    for (handle, base, marker, border, head_glow) in &materials_query {
         let color = if base.is_some() {
             base_color(theme, visuals.background_opacity)
         } else if marker.is_some() || border.is_some() {
             theme
+        } else if let Some(glow) = head_glow {
+            theme.with_alpha(glow.0)
         } else {
             continue;
         };
@@ -333,11 +398,81 @@ pub(super) fn sync_icon_placeholder(
     };
 }
 
-pub(super) fn drag_overlay(
+pub(super) fn sync_overlay_interaction(
     mouse: Res<ButtonInput<MouseButton>>,
-    mut window: Single<&mut Window, With<PrimaryWindow>>,
+    state: Res<ActiveJobState>,
+    mut placement: ResMut<NoticePlacement>,
+    window: Single<(&Window, &mut CursorOptions), With<PrimaryWindow>>,
+    world_root: Single<&mut Transform, With<NoticeWorldRoot>>,
+    board: Single<&mut Node, With<NoticeUiBoard>>,
 ) {
-    if mouse.just_pressed(MouseButton::Left) {
-        window.start_drag_move();
+    let (window, mut cursor_options) = window.into_inner();
+    let canvas_size = window.resolution.size();
+    let mut center = placement.center.unwrap_or(canvas_size * 0.5);
+    if let Some(previous_size) = placement.canvas_size {
+        center += (canvas_size - previous_size) * 0.5;
     }
+    placement.canvas_size = Some(canvas_size);
+
+    let cursor = cursor_in_window(window);
+    let notice_half_size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32) * 0.5;
+    let over_notice = cursor.is_some_and(|cursor| {
+        let offset = (cursor - center).abs();
+        offset.x <= notice_half_size.x && offset.y <= notice_half_size.y
+    });
+    if mouse.just_pressed(MouseButton::Left) && over_notice {
+        placement.drag_offset = cursor.map(|cursor| center - cursor);
+    }
+    if state.active_job.is_none() || !mouse.pressed(MouseButton::Left) {
+        placement.drag_offset = None;
+    } else if let (Some(cursor), Some(offset)) = (cursor, placement.drag_offset) {
+        center = cursor + offset;
+    }
+
+    let margin = notice_half_size + Vec2::splat(HEAD_GLOW_RADIUS);
+    center = center.clamp(margin, (canvas_size - margin).max(margin));
+    placement.center = Some(center);
+
+    let mut world_root = world_root.into_inner();
+    world_root.translation = Vec3::new(
+        center.x - canvas_size.x * 0.5,
+        canvas_size.y * 0.5 - center.y,
+        0.0,
+    );
+    let mut board = board.into_inner();
+    board.left = px(center.x - notice_half_size.x);
+    board.top = px(center.y - notice_half_size.y);
+
+    let over_notice = cursor.is_some_and(|cursor| {
+        let offset = (cursor - center).abs();
+        offset.x <= notice_half_size.x && offset.y <= notice_half_size.y
+    });
+    let hit_test = state.active_job.is_some() && (over_notice || placement.drag_offset.is_some());
+    if cursor_options.hit_test != hit_test {
+        cursor_options.hit_test = hit_test;
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn cursor_in_window(window: &Window) -> Option<Vec2> {
+    use windows_sys::Win32::{Foundation::POINT, UI::WindowsAndMessaging::GetCursorPos};
+
+    let WindowPosition::At(origin) = window.position else {
+        return window.cursor_position();
+    };
+    // Click-through windows do not receive cursor events, so poll the screen position.
+    let mut point = POINT { x: 0, y: 0 };
+    if unsafe { GetCursorPos(&mut point) } == 0 {
+        return None;
+    }
+    let cursor = (Vec2::new(point.x as f32, point.y as f32) - origin.as_vec2())
+        / window.resolution.scale_factor() as f32;
+    let size = window.resolution.size();
+    (cursor.x >= 0.0 && cursor.y >= 0.0 && cursor.x < size.x && cursor.y < size.y)
+        .then_some(cursor)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn cursor_in_window(window: &Window) -> Option<Vec2> {
+    window.cursor_position()
 }

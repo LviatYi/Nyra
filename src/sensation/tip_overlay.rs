@@ -9,7 +9,8 @@ use self::{
     progress_border::update_countdown,
     text_scroll::animate_tip_text,
     view::{
-        drag_overlay, setup_overlay, sync_icon_placeholder, sync_notice, sync_overlay_visibility,
+        setup_overlay, sync_icon_placeholder, sync_notice, sync_overlay_interaction,
+        sync_overlay_visibility,
     },
     visual_config::RotationNoticeVisualConfig,
 };
@@ -32,5 +33,5 @@ pub(super) fn configure(app: &mut App) {
                 .chain()
                 .after(JobProcessing),
         )
-        .add_systems(Update, drag_overlay);
+        .add_systems(Update, sync_overlay_interaction);
 }

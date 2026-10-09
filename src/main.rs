@@ -23,7 +23,10 @@ use bevy::{
         RenderPlugin,
         settings::{Backends, WgpuSettings},
     },
-    window::{CompositeAlphaMode, WindowLevel, WindowResizeConstraints, WindowResolution},
+    window::{
+        CompositeAlphaMode, CursorOptions, WindowLevel, WindowMode, WindowPosition,
+        WindowResizeConstraints, WindowResolution,
+    },
 };
 
 #[derive(serde::Deserialize)]
@@ -266,6 +269,7 @@ fn run(
     hotkeys: GlobalHotkeys,
     observer: Option<PerceptionObserver>,
 ) {
+    let (canvas_width, canvas_height) = overlay_canvas_size();
     let mut app = App::new();
     if let Some(observer) = observer {
         app.insert_resource(observer);
@@ -285,9 +289,15 @@ fn run(
                     ..default()
                 })
                 .set(WindowPlugin {
+                    primary_cursor_options: Some(CursorOptions {
+                        hit_test: false,
+                        ..default()
+                    }),
                     primary_window: Some(Window {
-                        title: "Nyra".into(),
-                        resolution: WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT),
+                        title: String::new(),
+                        resolution: WindowResolution::new(canvas_width, canvas_height),
+                        mode: WindowMode::Windowed,
+                        position: WindowPosition::At(IVec2::ZERO),
                         resize_constraints: WindowResizeConstraints {
                             min_width: WINDOW_WIDTH as f32,
                             min_height: WINDOW_HEIGHT as f32,
@@ -308,4 +318,20 @@ fn run(
         .add_plugins(SensoryPlugin)
         .add_plugins(ReactionPlugin)
         .run();
+}
+
+#[cfg(target_os = "windows")]
+fn overlay_canvas_size() -> (u32, u32) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
+    };
+
+    let width = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(WINDOW_WIDTH as i32) as u32;
+    let height = unsafe { GetSystemMetrics(SM_CYSCREEN) }.max(WINDOW_HEIGHT as i32) as u32;
+    (width, height)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn overlay_canvas_size() -> (u32, u32) {
+    (WINDOW_WIDTH, WINDOW_HEIGHT)
 }

@@ -19,7 +19,17 @@ impl BorderProgress {
     pub(super) fn mesh(&self) -> Mesh {
         self.geometry.progress_mesh(self.progress)
     }
+
+    pub(super) fn head_position(&self) -> Option<Vec2> {
+        self.geometry.progress_head(self.progress)
+    }
 }
+
+#[derive(Component)]
+pub(super) struct BorderHead;
+
+#[derive(Component)]
+pub(super) struct BorderHeadGlow(pub(super) f32);
 
 #[derive(Component, Default, Clone)]
 pub(super) struct CountdownText;
@@ -28,6 +38,7 @@ pub(super) fn update_countdown(
     time: Res<Time<Real>>,
     state: Res<ActiveJobState>,
     border: Single<(&mut BorderProgress, &Mesh2d)>,
+    head: Single<(&mut Transform, &mut Visibility), With<BorderHead>>,
     mut label: Single<&mut Text, With<CountdownText>>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
@@ -54,5 +65,13 @@ pub(super) fn update_countdown(
         if let Some(mut mesh) = meshes.get_mut(&mesh_handle.0) {
             *mesh = border.mesh();
         }
+    }
+    let (mut head_transform, mut head_visibility) = head.into_inner();
+    if let Some(position) = border.head_position() {
+        head_transform.translation.x = position.x;
+        head_transform.translation.y = position.y;
+        *head_visibility = Visibility::Visible;
+    } else {
+        *head_visibility = Visibility::Hidden;
     }
 }

@@ -205,6 +205,24 @@ impl BorderGeometry {
         }
         triangle_mesh(positions, indices)
     }
+
+    pub(super) fn progress_head(&self, progress: f32) -> Option<Vec2> {
+        if progress <= 0.0 {
+            return None;
+        }
+        let distance = progress.clamp(0.0, 1.0) * self.total_length;
+        let complete = self
+            .cumulative_lengths
+            .partition_point(|length| *length <= distance);
+        let segment = complete.saturating_sub(1).min(self.vertices.len() - 2);
+        let start = self.cumulative_lengths[segment];
+        let end = self.cumulative_lengths[segment + 1];
+        let pair = self.vertices[segment].lerp(
+            self.vertices[segment + 1],
+            ((distance - start) / (end - start)).clamp(0.0, 1.0),
+        );
+        Some((pair.inner + pair.outer) * 0.5)
+    }
 }
 
 pub(super) fn triangle_mesh(positions: Vec<[f32; 3]>, indices: Vec<u32>) -> Mesh {
