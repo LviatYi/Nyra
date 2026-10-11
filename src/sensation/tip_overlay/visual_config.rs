@@ -50,12 +50,17 @@ pub struct RotationNoticeVisualConfig {
 impl Default for RotationNoticeVisualConfig {
     fn default() -> Self {
         Self {
-            base_background: None,
+            base_background: Some(LayerAsset {
+                path: "sensation/sensation-layer-background@4x.png".into(),
+                tint_with_theme: true,
+                opacity: 1.0,
+                sizing: LayerSizing::Stretch,
+            }),
             icon_background: None,
             countdown_background: None,
             border_path: Some("sensation/rotation_notice_border.json".into()),
-            border_width: 2.0,
-            background_opacity: 0.72,
+            border_width: 1.0,
+            background_opacity: 1.0,
         }
     }
 }

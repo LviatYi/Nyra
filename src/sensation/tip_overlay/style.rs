@@ -1,4 +1,4 @@
-use crate::{job::JobConfig, settings_default_values::*};
+use crate::job::JobConfig;
 use bevy::{prelude::*, sprite_render::AlphaMode2d};
 
 pub(super) fn tip_color(jobs: &JobConfig, tip_index: usize) -> Color {
@@ -8,14 +8,9 @@ pub(super) fn tip_color(jobs: &JobConfig, tip_index: usize) -> Color {
     )
 }
 
-pub(super) fn base_color(theme: Color, opacity: f32) -> Color {
+pub(super) fn border_track_color(theme: Color) -> Color {
     let theme = theme.to_srgba();
-    Color::srgba(
-        theme.red * TIP_OVERLAY_BACKGROUND_BRIGHTNESS,
-        theme.green * TIP_OVERLAY_BACKGROUND_BRIGHTNESS,
-        theme.blue * TIP_OVERLAY_BACKGROUND_BRIGHTNESS,
-        opacity.clamp(0.0, 1.0),
-    )
+    Color::srgba(theme.red * 0.25, theme.green * 0.25, theme.blue * 0.25, 1.0)
 }
 
 pub(super) fn color_material(color: Color) -> ColorMaterial {

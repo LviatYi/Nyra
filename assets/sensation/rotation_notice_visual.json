@@ -1,8 +1,12 @@
 {
-  "baseBackground": null,
+  "baseBackground": {
+    "path": "sensation/sensation-layer-background@4x.png",
+    "tintWithTheme": true,
+    "sizing": { "mode": "stretch" }
+  },
   "iconBackground": null,
   "countdownBackground": null,
   "borderPath": "sensation/rotation_notice_border.json",
-  "borderWidth": 2,
-  "backgroundOpacity": 0.72
+  "borderWidth": 1,
+  "backgroundOpacity": 1
 }

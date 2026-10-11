@@ -1,7 +1,7 @@
 use super::{
     geometry::{BorderGeometry, icon_marker_mesh},
-    progress_border::{BorderHead, BorderHeadGlow, BorderProgress, CountdownText},
-    style::{base_color, color_material, set_material_color, tip_color},
+    progress_border::{BorderHead, BorderHeadGlow, BorderProgress, BorderTrack, CountdownText},
+    style::{border_track_color, color_material, set_material_color, tip_color},
     text_scroll::{TextScroll, TipTextViewport},
     visual_config::{
         LayerSizing, RotationNoticeVisualConfig, layer_color, layer_image, layer_sprite,
@@ -19,8 +19,8 @@ use bevy::{
     window::{CursorOptions, PrimaryWindow, WindowPosition},
 };
 
-const ICON_CENTER_X: f32 = -(WINDOW_WIDTH as f32) / 2.0 + 20.0;
-const ICON_SIZE: Vec2 = Vec2::splat(26.0);
+const ICON_CENTER_X: f32 = -(WINDOW_WIDTH as f32) / 2.0 + 30.0;
+const ICON_SIZE: Vec2 = Vec2::splat(32.0);
 const CONTENT_COLOR: Color = Color::srgb(0.94, 0.96, 1.0);
 const HEAD_GLOW_RADIUS: f32 = 4.5;
 
@@ -38,10 +38,6 @@ pub(super) struct NoticeUiBoard;
 
 #[derive(Component)]
 pub(super) struct TipText;
-#[derive(Component)]
-pub(super) struct BaseFallback;
-#[derive(Component)]
-pub(super) struct IconFallback;
 #[derive(Component)]
 pub(super) struct IconMarker;
 #[derive(Component)]
@@ -74,7 +70,7 @@ pub(super) fn setup_overlay(
         2.0
     };
     let geometry = BorderGeometry::load(visuals.border_path.as_deref(), border_width);
-    let fill_mesh = meshes.add(geometry.fill_mesh());
+    let track_mesh = meshes.add(geometry.progress_mesh(1.0));
     let marker_mesh = meshes.add(icon_marker_mesh());
     let border = BorderProgress::new(geometry);
     let border_mesh = meshes.add(border.mesh());
@@ -82,12 +78,9 @@ pub(super) fn setup_overlay(
     let outer_glow_mesh = meshes.add(Circle::new(HEAD_GLOW_RADIUS));
     let inner_glow_mesh = meshes.add(Circle::new(3.0));
     let head_core_mesh = meshes.add(Circle::new(1.5));
-    let base_material = materials.add(color_material(base_color(
-        theme,
-        visuals.background_opacity,
-    )));
     let marker_material = materials.add(color_material(theme));
     let border_material = materials.add(color_material(theme));
+    let track_material = materials.add(color_material(border_track_color(theme)));
     let outer_glow_material = materials.add(color_material(theme.with_alpha(0.16)));
     let inner_glow_material = materials.add(color_material(theme.with_alpha(0.4)));
     let head_core_material = materials.add(color_material(Color::srgba(1.0, 1.0, 1.0, 0.95)));
@@ -97,13 +90,6 @@ pub(super) fn setup_overlay(
     let notice_root = commands
         .spawn((Transform::default(), Visibility::default(), NoticeWorldRoot))
         .id();
-    commands.spawn((
-        Mesh2d(fill_mesh),
-        MeshMaterial2d(base_material),
-        Transform::from_xyz(0.0, 0.0, 0.0),
-        BaseFallback,
-        ChildOf(notice_root),
-    ));
     let mut base_art = layer_sprite(
         &asset_server,
         visuals.base_background.as_ref(),
@@ -121,15 +107,6 @@ pub(super) fn setup_overlay(
         ChildOf(notice_root),
     ));
 
-    commands.spawn((
-        Sprite::from_color(
-            icon_background_color(theme, visuals.background_opacity),
-            ICON_SIZE,
-        ),
-        Transform::from_xyz(ICON_CENTER_X, 0.0, 0.3),
-        IconFallback,
-        ChildOf(notice_root),
-    ));
     let mut icon_background =
         layer_sprite(&asset_server, visuals.icon_background.as_ref(), ICON_SIZE);
     icon_background.color = layer_color(
@@ -151,9 +128,16 @@ pub(super) fn setup_overlay(
         ChildOf(notice_root),
     ));
     commands.spawn((
-        Sprite::from_color(Color::NONE, Vec2::splat(14.0)),
+        Sprite::from_color(Color::NONE, Vec2::splat(24.0)),
         Transform::from_xyz(ICON_CENTER_X, 0.0, 0.8),
         IconArt::default(),
+        ChildOf(notice_root),
+    ));
+    commands.spawn((
+        Mesh2d(track_mesh),
+        MeshMaterial2d(track_material),
+        Transform::from_xyz(0.0, 0.0, 1.9),
+        BorderTrack,
         ChildOf(notice_root),
     ));
     commands.spawn((
@@ -166,7 +150,7 @@ pub(super) fn setup_overlay(
     commands
         .spawn((
             Transform::from_xyz(head_position.x, head_position.y, 2.1),
-            Visibility::Visible,
+            Visibility::Hidden,
             BorderHead,
             ChildOf(notice_root),
         ))
@@ -222,10 +206,10 @@ pub(super) fn setup_overlay(
                     .spawn((
                         Node {
                             position_type: PositionType::Absolute,
-                            left: px(40),
-                            top: px(4),
-                            width: px(112),
-                            height: px(20),
+                            left: px(66),
+                            top: px(9),
+                            width: px(123),
+                            height: px(22),
                             align_items: AlignItems::Center,
                             justify_content: JustifyContent::FlexStart,
                             overflow: Overflow::clip(),
@@ -237,7 +221,7 @@ pub(super) fn setup_overlay(
                         viewport.spawn((
                             Text(current_tip),
                             TextFont {
-                                font: FontSource::SystemUi,
+                                font: FontSource::system_ui(),
                                 font_size: FontSize::Px(13.0),
                                 ..default()
                             },
@@ -254,9 +238,8 @@ pub(super) fn setup_overlay(
                 board
                     .spawn(Node {
                         position_type: PositionType::Absolute,
-                        right: px(8),
+                        right: px(7),
                         bottom: px(3),
-                        padding: UiRect::axes(px(3), px(1)),
                         ..default()
                     })
                     .with_children(|countdown| {
@@ -275,8 +258,8 @@ pub(super) fn setup_overlay(
                         countdown.spawn((
                             Text("--".into()),
                             TextFont {
-                                font: FontSource::SystemUi,
-                                font_size: FontSize::Px(10.0),
+                                font: FontSource::system_ui(),
+                                font_size: FontSize::Px(6.0),
                                 ..default()
                             },
                             TextColor(theme),
@@ -285,16 +268,6 @@ pub(super) fn setup_overlay(
                     });
             });
         });
-}
-
-fn icon_background_color(theme: Color, opacity: f32) -> Color {
-    let theme = theme.to_srgba();
-    Color::srgba(
-        theme.red * 0.15,
-        theme.green * 0.15,
-        theme.blue * 0.15,
-        (opacity * 0.75).clamp(0.0, 1.0),
-    )
 }
 
 pub(super) fn sync_notice(
@@ -308,15 +281,14 @@ pub(super) fn sync_notice(
     mut sprites: Query<(
         &mut Sprite,
         Option<&BaseArt>,
-        Option<&IconFallback>,
         Option<&IconBackgroundArt>,
         Option<&mut IconArt>,
     )>,
     materials_query: Query<(
         &MeshMaterial2d<ColorMaterial>,
-        Option<&BaseFallback>,
         Option<&IconMarker>,
         Option<&BorderProgress>,
+        Option<&BorderTrack>,
         Option<&BorderHeadGlow>,
     )>,
     mut materials: ResMut<Assets<ColorMaterial>>,
@@ -336,15 +308,13 @@ pub(super) fn sync_notice(
         theme,
         visuals.background_opacity,
     );
-    for (mut sprite, base_art, icon_fallback, icon_background, icon_art) in &mut sprites {
+    for (mut sprite, base_art, icon_background, icon_art) in &mut sprites {
         if base_art.is_some() {
             sprite.color = layer_color(
                 visuals.base_background.as_ref(),
                 theme,
                 visuals.background_opacity,
             );
-        } else if icon_fallback.is_some() {
-            sprite.color = icon_background_color(theme, visuals.background_opacity);
         } else if icon_background.is_some() {
             sprite.color = layer_color(
                 visuals.icon_background.as_ref(),
@@ -357,18 +327,18 @@ pub(super) fn sync_notice(
             if let Some(path) = icon_path {
                 sprite.image = asset_server.load(path.to_owned());
                 sprite.color = theme;
-                sprite.custom_size = Some(Vec2::splat(14.0));
+                sprite.custom_size = Some(Vec2::splat(24.0));
                 sprite.image_mode = SpriteImageMode::Scale(SpriteScalingMode::FitCenter);
             } else {
                 sprite.color = Color::NONE;
             }
         }
     }
-    for (handle, base, marker, border, head_glow) in &materials_query {
-        let color = if base.is_some() {
-            base_color(theme, visuals.background_opacity)
-        } else if marker.is_some() || border.is_some() {
+    for (handle, marker, border, track, head_glow) in &materials_query {
+        let color = if marker.is_some() || border.is_some() {
             theme
+        } else if track.is_some() {
+            border_track_color(theme)
         } else if let Some(glow) = head_glow {
             theme.with_alpha(glow.0)
         } else {

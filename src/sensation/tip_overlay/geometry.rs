@@ -14,6 +14,9 @@ struct BorderPathDefinition {
     canvas: [f32; 2],
     /// Closed polygon in screen coordinates; the first point is not repeated.
     points: Vec<[f32; 2]>,
+    /// Authored outer contour, paired with points; overrides generated border width.
+    #[serde(default)]
+    outer_points: Option<Vec<[f32; 2]>>,
 }
 
 #[derive(Clone, Copy)]
@@ -67,13 +70,18 @@ impl BorderGeometry {
             serde_json::from_str(source).map_err(|error| error.to_string())?;
         let size = Vec2::from_array(definition.canvas);
         if size != Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32) {
-            return Err("path canvas must match the current 160x40 window".into());
+            return Err("path canvas must match the current overlay size".into());
         }
         if !width.is_finite() || width <= 0.0 || width >= size.min_element() / 4.0 {
             return Err("border width is outside the supported range".into());
         }
         if definition.points.len() < 3 {
             return Err("path needs at least three vertices".into());
+        }
+        if definition.outer_points.as_ref().is_some_and(|outer| {
+            outer.len() != definition.points.len()
+        }) {
+            return Err("inner and outer contours must have matching vertex counts".into());
         }
         let points = definition
             .points
@@ -99,13 +107,25 @@ impl BorderGeometry {
             let previous = points[(index + points.len() - 1) % points.len()];
             let current = points[index];
             let next = points[(index + 1) % points.len()];
+            if let Some(outer_points) = &definition.outer_points {
+                let [x, y] = outer_points[index];
+                let outer = Vec2::new(x - size.x / 2.0, size.y / 2.0 - y);
+                if !outer.is_finite()
+                    || outer.x.abs() > size.x / 2.0
+                    || outer.y.abs() > size.y / 2.0
+                {
+                    return Err("outer contour vertices must lie inside the window".into());
+                }
+                vertices.push(BorderVertexPair {
+                    inner: current,
+                    outer,
+                });
+                continue;
+            }
             let incoming = (current - previous).normalize_or_zero();
             let outgoing = (next - current).normalize_or_zero();
-            if incoming == Vec2::ZERO
-                || outgoing == Vec2::ZERO
-                || incoming.perp_dot(outgoing) * winding <= 0.0001
-            {
-                return Err("path must be a strictly convex closed polygon".into());
+            if incoming == Vec2::ZERO || outgoing == Vec2::ZERO {
+                return Err("path must not contain duplicate adjacent vertices".into());
             }
             let outward = |direction: Vec2| {
                 let left = Vec2::new(-direction.y, direction.x);
@@ -141,23 +161,6 @@ impl BorderGeometry {
             total_length,
             winding,
         })
-    }
-
-    pub(super) fn fill_mesh(&self) -> Mesh {
-        let points = &self.vertices[..self.vertices.len() - 1];
-        let positions = points
-            .iter()
-            .map(|vertex| [vertex.inner.x, vertex.inner.y, 0.0])
-            .collect();
-        let mut indices = Vec::with_capacity((points.len() - 2) * 3);
-        for index in 1..points.len() - 1 {
-            if self.winding < 0.0 {
-                indices.extend_from_slice(&[0, index as u32 + 1, index as u32]);
-            } else {
-                indices.extend_from_slice(&[0, index as u32, index as u32 + 1]);
-            }
-        }
-        triangle_mesh(positions, indices)
     }
 
     pub(super) fn progress_mesh(&self, progress: f32) -> Mesh {

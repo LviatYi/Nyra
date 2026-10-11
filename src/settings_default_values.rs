@@ -4,8 +4,9 @@ use crate::job::JobTick;
 use std::time::Duration;
 
 //region Windows
-pub const WINDOW_WIDTH: u32 = 160;
-pub const WINDOW_HEIGHT: u32 = 40;
+// The sensation background is authored at 4x (800x200).
+pub const WINDOW_WIDTH: u32 = 800 / 4;
+pub const WINDOW_HEIGHT: u32 = 200 / 4;
 //endregion
 
 //region UI
@@ -14,7 +15,6 @@ pub const DEFAULT_TIP_COLORS: &[&str] = &[
     "#33E078", "#4DA3FF", "#A879FF", "#FFB347", "#FF6685", "#37D6D0",
 ];
 
-pub const TIP_OVERLAY_BACKGROUND_BRIGHTNESS: f32 = 0.18;
 pub const TIP_TEXT_SCROLL_START_WAIT_DURATION: Duration = Duration::from_millis(1500);
 pub const TIP_TEXT_SCROLL_END_WAIT_DURATION: Duration = Duration::from_millis(1000);
 pub const TIP_TEXT_SCROLL_SPEED: f32 = 120.0;

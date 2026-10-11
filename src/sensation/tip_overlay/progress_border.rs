@@ -12,7 +12,7 @@ impl BorderProgress {
     pub(super) fn new(geometry: BorderGeometry) -> Self {
         Self {
             geometry,
-            progress: 1.0,
+            progress: 0.0,
         }
     }
 
@@ -24,6 +24,9 @@ impl BorderProgress {
         self.geometry.progress_head(self.progress)
     }
 }
+
+#[derive(Component)]
+pub(super) struct BorderTrack;
 
 #[derive(Component)]
 pub(super) struct BorderHead;
@@ -49,13 +52,13 @@ pub(super) fn update_countdown(
     let (progress, caption) = match active_job.countdown_at(time.elapsed()) {
         Some((remaining, total)) => {
             let progress = if total.is_zero() {
-                0.0
+                1.0
             } else {
-                (remaining.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0)
+                (1.0 - remaining.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0)
             };
             (progress, format!("{:.3}s", remaining.as_secs_f64()))
         }
-        None => (1.0, "--".to_string()),
+        None => (0.0, "--".to_string()),
     };
     if label.0 != caption {
         label.0 = caption;
