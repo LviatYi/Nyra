@@ -1,7 +1,6 @@
 use bevy::{
     prelude::*,
     sprite::{BorderRect, SpriteImageMode, TextureSlicer},
-    ui::widget::NodeImageMode,
 };
 use serde::Deserialize;
 use std::fs;
@@ -41,7 +40,6 @@ pub enum LayerSizing {
 pub struct RotationNoticeVisualConfig {
     pub base_background: Option<LayerAsset>,
     pub icon_background: Option<LayerAsset>,
-    pub countdown_background: Option<LayerAsset>,
     pub border_path: Option<String>,
     pub border_width: f32,
     pub background_opacity: f32,
@@ -57,7 +55,6 @@ impl Default for RotationNoticeVisualConfig {
                 sizing: LayerSizing::Stretch,
             }),
             icon_background: None,
-            countdown_background: None,
             border_path: Some("sensation/rotation_notice_border.json".into()),
             border_width: 1.0,
             background_opacity: 1.0,
@@ -106,21 +103,6 @@ pub(super) fn layer_sprite(
         custom_size,
         ..default()
     }
-}
-
-pub(super) fn layer_image(asset_server: &AssetServer, asset: Option<&LayerAsset>) -> ImageNode {
-    let Some(asset) = asset.filter(|asset| !asset.path.trim().is_empty()) else {
-        return ImageNode::default();
-    };
-    let mode = match asset.sizing {
-        LayerSizing::Original => NodeImageMode::Auto,
-        LayerSizing::Stretch => NodeImageMode::Stretch,
-        LayerSizing::Sliced { border } => NodeImageMode::Sliced(TextureSlicer {
-            border: BorderRect::all(border.max(0.0)),
-            ..default()
-        }),
-    };
-    ImageNode::new(asset_server.load(asset.path.clone())).with_mode(mode)
 }
 
 pub(super) fn layer_color(asset: Option<&LayerAsset>, theme: Color, global_opacity: f32) -> Color {

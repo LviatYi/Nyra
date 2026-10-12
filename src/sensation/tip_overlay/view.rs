@@ -3,9 +3,7 @@ use super::{
     progress_border::{BorderHead, BorderHeadGlow, BorderProgress, BorderTrack, CountdownText},
     style::{border_track_color, color_material, set_material_color, tip_color},
     text_scroll::{TextScroll, TipTextViewport},
-    visual_config::{
-        LayerSizing, RotationNoticeVisualConfig, layer_color, layer_image, layer_sprite,
-    },
+    visual_config::{RotationNoticeVisualConfig, layer_color, layer_sprite},
 };
 use crate::{
     controller::ActiveJobState,
@@ -48,8 +46,6 @@ pub(super) struct IconBackgroundArt;
 pub(super) struct IconArt {
     has_source: bool,
 }
-#[derive(Component)]
-pub(super) struct CountdownBackground;
 
 pub(super) fn setup_overlay(
     mut commands: Commands,
@@ -175,16 +171,6 @@ pub(super) fn setup_overlay(
         });
 
     let current_tip = jobs.0.jobs[0].tip().text.replace(['\r', '\n'], " ");
-    let countdown_art = layer_image(&asset_server, visuals.countdown_background.as_ref());
-    let countdown_stretches = visuals
-        .countdown_background
-        .as_ref()
-        .is_some_and(|asset| !matches!(asset.sizing, LayerSizing::Original));
-    let countdown_size = if countdown_stretches {
-        percent(100)
-    } else {
-        Val::Auto
-    };
     commands
         .spawn(Node {
             width: percent(100),
@@ -235,37 +221,22 @@ pub(super) fn setup_overlay(
                             TipText,
                         ));
                     });
-                board
-                    .spawn(Node {
-                        position_type: PositionType::Absolute,
-                        right: px(7),
-                        bottom: px(3),
+                board.spawn((
+                    Text("--".into()),
+                    TextFont {
+                        font: FontSource::system_ui(),
+                        font_size: FontSize::Px(6.0),
                         ..default()
-                    })
-                    .with_children(|countdown| {
-                        countdown.spawn((
-                            countdown_art,
-                            Node {
-                                position_type: PositionType::Absolute,
-                                right: px(0),
-                                bottom: px(0),
-                                width: countdown_size,
-                                height: countdown_size,
-                                ..default()
-                            },
-                            CountdownBackground,
-                        ));
-                        countdown.spawn((
-                            Text("--".into()),
-                            TextFont {
-                                font: FontSource::system_ui(),
-                                font_size: FontSize::Px(6.0),
-                                ..default()
-                            },
-                            TextColor(theme),
-                            CountdownText,
-                        ));
-                    });
+                    },
+                    TextColor(theme),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        right: percent(8),
+                        bottom: percent(4),
+                        ..default()
+                    },
+                    CountdownText,
+                ));
             });
         });
 }
@@ -277,7 +248,6 @@ pub(super) fn sync_notice(
     asset_server: Res<AssetServer>,
     mut text: Single<&mut Text, With<TipText>>,
     mut countdown_color: Single<&mut TextColor, With<CountdownText>>,
-    mut countdown_art: Single<&mut ImageNode, With<CountdownBackground>>,
     mut sprites: Query<(
         &mut Sprite,
         Option<&BaseArt>,
@@ -303,11 +273,6 @@ pub(super) fn sync_notice(
         text.0 = content;
     }
     countdown_color.0 = theme;
-    countdown_art.color = layer_color(
-        visuals.countdown_background.as_ref(),
-        theme,
-        visuals.background_opacity,
-    );
     for (mut sprite, base_art, icon_background, icon_art) in &mut sprites {
         if base_art.is_some() {
             sprite.color = layer_color(

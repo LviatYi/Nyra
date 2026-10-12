@@ -5,7 +5,6 @@
     "sizing": { "mode": "stretch" }
   },
   "iconBackground": null,
-  "countdownBackground": null,
   "borderPath": "sensation/rotation_notice_border.json",
   "borderWidth": 1,
   "backgroundOpacity": 1
