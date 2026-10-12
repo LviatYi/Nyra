@@ -56,7 +56,7 @@ pub(super) fn update_countdown(
             } else {
                 (1.0 - remaining.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0)
             };
-            (progress, format!("{:.3}s", remaining.as_secs_f64()))
+            (progress, format!("{:06.3}s", remaining.as_secs_f64().min(99.999)))
         }
         None => (0.0, "--".to_string()),
     };
