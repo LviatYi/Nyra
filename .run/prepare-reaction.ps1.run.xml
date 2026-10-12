@@ -1,0 +1,6 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="prepare-reaction.ps1" type="PowerShellRunType" factoryName="PowerShell" scriptUrl="$PROJECT_DIR$/scripts/prepare-reaction.ps1">
+    <envs />
+    <method v="2" />
+  </configuration>
+</component>
