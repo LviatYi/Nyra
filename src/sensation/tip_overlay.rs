@@ -18,6 +18,10 @@ use crate::controller::{ActiveJobState, JobProcessing};
 use bevy::prelude::*;
 
 pub(super) fn configure(app: &mut App) {
+    #[cfg(target_os = "windows")]
+    app.add_observer(view::mark_overlay_window_non_rude)
+        .add_observer(view::unmark_overlay_window_non_rude);
+
     app.insert_resource(RotationNoticeVisualConfig::load())
         .add_systems(Startup, setup_overlay)
         .add_systems(

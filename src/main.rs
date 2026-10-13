@@ -309,6 +309,7 @@ fn run(
                         resizable: false,
                         window_level: WindowLevel::AlwaysOnTop,
                         skip_taskbar: true,
+                        visible: false,
                         ..default()
                     }),
                     ..default()
