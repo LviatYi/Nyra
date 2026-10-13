@@ -165,20 +165,25 @@ impl BorderGeometry {
     }
 
     pub(super) fn progress_mesh(&self, progress: f32) -> Mesh {
-        let distance = progress.clamp(0.0, 1.0) * self.total_length;
-        let complete = self
-            .cumulative_lengths
-            .partition_point(|length| *length <= distance);
-        let complete_segments = complete.saturating_sub(1).min(self.vertices.len() - 1);
-        let mut visible = self.vertices[..=complete_segments].to_vec();
-        if distance > 0.0 && complete_segments < self.vertices.len() - 1 {
-            let start = self.cumulative_lengths[complete_segments];
-            let end = self.cumulative_lengths[complete_segments + 1];
-            visible.push(self.vertices[complete_segments].lerp(
-                self.vertices[complete_segments + 1],
-                (distance - start) / (end - start),
-            ));
+        self.progress_range_mesh(0.0, progress)
+    }
+
+    pub(super) fn progress_range_mesh(&self, start: f32, end: f32) -> Mesh {
+        let start_distance = start.clamp(0.0, 1.0) * self.total_length;
+        let end_distance = end.clamp(0.0, 1.0) * self.total_length;
+        if start_distance >= end_distance {
+            return triangle_mesh(Vec::new(), Vec::new());
         }
+        let first_inside = self
+            .cumulative_lengths
+            .partition_point(|length| *length <= start_distance);
+        let last_inside = self
+            .cumulative_lengths
+            .partition_point(|length| *length < end_distance);
+        let mut visible = Vec::with_capacity(last_inside - first_inside + 2);
+        visible.push(self.pair_at(start_distance));
+        visible.extend_from_slice(&self.vertices[first_inside..last_inside]);
+        visible.push(self.pair_at(end_distance));
         let mut positions = Vec::with_capacity(visible.len() * 2);
         for vertex in &visible {
             positions.push([vertex.inner.x, vertex.inner.y, 0.0]);
@@ -214,18 +219,21 @@ impl BorderGeometry {
         if progress <= 0.0 {
             return None;
         }
-        let distance = progress.clamp(0.0, 1.0) * self.total_length;
+        let pair = self.pair_at(progress.clamp(0.0, 1.0) * self.total_length);
+        Some((pair.inner + pair.outer) * 0.5)
+    }
+
+    fn pair_at(&self, distance: f32) -> BorderVertexPair {
         let complete = self
             .cumulative_lengths
             .partition_point(|length| *length <= distance);
         let segment = complete.saturating_sub(1).min(self.vertices.len() - 2);
         let start = self.cumulative_lengths[segment];
         let end = self.cumulative_lengths[segment + 1];
-        let pair = self.vertices[segment].lerp(
+        self.vertices[segment].lerp(
             self.vertices[segment + 1],
             ((distance - start) / (end - start)).clamp(0.0, 1.0),
-        );
-        Some((pair.inner + pair.outer) * 0.5)
+        )
     }
 }
 

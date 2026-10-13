@@ -1,6 +1,8 @@
 use super::{
     geometry::{BorderGeometry, icon_marker_mesh},
-    progress_border::{BorderHead, BorderHeadGlow, BorderProgress, BorderTrack, CountdownText},
+    progress_border::{
+        BorderHead, BorderHeadGlow, BorderOutgoing, BorderProgress, BorderTrack, CountdownText,
+    },
     style::{border_track_color, color_material, set_material_color, tip_color},
     text_scroll::{TextScroll, TipTextViewport},
     visual_config::{RotationNoticeVisualConfig, layer_color, layer_sprite},
@@ -114,9 +116,16 @@ pub(super) fn setup_overlay(
             Transform::from_xyz(0.0, 0.0, 1.9)
             BorderTrack
             --
-            Mesh2d({asset_value(border.mesh())})
+            Mesh2d({asset_value(border.outgoing_mesh(0.0))})
+            MeshMaterial2d<ColorMaterial>(asset_value(color_material(Color::NONE)))
+            Transform::from_xyz(0.0, 0.0, 1.95)
+            Visibility::Hidden
+            BorderOutgoing
+            --
+            Mesh2d({asset_value(border.outgoing_mesh(0.0))})
             MeshMaterial2d<ColorMaterial>(asset_value(color_material(Color::NONE)))
             Transform::from_xyz(0.0, 0.0, 2.0)
+            Visibility::Hidden
             border
             --
             Transform::from_xyz(head_position.x, head_position.y, 2.1)
