@@ -9,8 +9,8 @@ use self::{
     progress_border::update_countdown,
     text_scroll::animate_tip_text,
     view::{
-        setup_overlay, sync_icon_placeholder, sync_notice, sync_overlay_interaction,
-        sync_overlay_visibility,
+        setup_overlay, sync_icon_placeholder, sync_notice, sync_overlay_hit_test,
+        sync_overlay_position, sync_overlay_visibility,
     },
     visual_config::RotationNoticeVisualConfig,
 };
@@ -23,7 +23,7 @@ pub(super) fn configure(app: &mut App) {
         .add_systems(
             Update,
             (
-                (sync_overlay_visibility, sync_notice)
+                (sync_notice, sync_overlay_visibility)
                     .chain()
                     .run_if(resource_changed::<ActiveJobState>),
                 update_countdown,
@@ -33,5 +33,10 @@ pub(super) fn configure(app: &mut App) {
                 .chain()
                 .after(JobProcessing),
         )
-        .add_systems(Update, sync_overlay_interaction);
+        .add_systems(
+            Update,
+            (sync_overlay_position, sync_overlay_hit_test)
+                .chain()
+                .after(JobProcessing),
+        );
 }

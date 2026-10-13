@@ -1,6 +1,6 @@
 use bevy::{
     prelude::*,
-    sprite::{BorderRect, SpriteImageMode, TextureSlicer},
+    sprite::{BorderRect, SpriteImageMode, SpriteTemplate, TextureSlicer},
 };
 use serde::Deserialize;
 use std::fs;
@@ -79,12 +79,14 @@ impl RotationNoticeVisualConfig {
 }
 
 pub(super) fn layer_sprite(
-    asset_server: &AssetServer,
     asset: Option<&LayerAsset>,
     size: Vec2,
-) -> Sprite {
+) -> SpriteTemplate {
     let Some(asset) = asset.filter(|asset| !asset.path.trim().is_empty()) else {
-        return Sprite::from_color(Color::NONE, size);
+        return SpriteTemplate {
+            custom_size: Some(size),
+            ..default()
+        };
     };
     let (image_mode, custom_size) = match asset.sizing {
         LayerSizing::Original => (SpriteImageMode::Auto, None),
@@ -97,8 +99,8 @@ pub(super) fn layer_sprite(
             Some(size),
         ),
     };
-    Sprite {
-        image: asset_server.load(asset.path.clone()),
+    SpriteTemplate {
+        image: asset.path.clone().into(),
         image_mode,
         custom_size,
         ..default()

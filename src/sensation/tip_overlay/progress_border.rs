@@ -2,7 +2,7 @@ use super::geometry::BorderGeometry;
 use crate::controller::ActiveJobState;
 use bevy::prelude::*;
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub(super) struct BorderProgress {
     geometry: BorderGeometry,
     progress: f32,
@@ -25,13 +25,13 @@ impl BorderProgress {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub(super) struct BorderTrack;
 
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub(super) struct BorderHead;
 
-#[derive(Component)]
+#[derive(Component, Default, Clone)]
 pub(super) struct BorderHeadGlow(pub(super) f32);
 
 #[derive(Component, Default, Clone)]

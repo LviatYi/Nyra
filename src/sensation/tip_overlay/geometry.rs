@@ -34,6 +34,7 @@ impl BorderVertexPair {
     }
 }
 
+#[derive(Clone)]
 pub(super) struct BorderGeometry {
     vertices: Vec<BorderVertexPair>,
     cumulative_lengths: Vec<f32>,
