@@ -7,10 +7,10 @@ mod view;
 mod visual_config;
 
 use crate::controller::{ActiveJobState, JobProcessing};
+use crate::sensation::tip_overlay::motion::BorderMotion;
 use crate::sensation::tip_overlay::progress_border::{
     render_border, setup_border_animations, sync_border_playback, sync_countdown_text,
 };
-use crate::sensation::tip_overlay::motion::BorderMotion;
 use crate::sensation::tip_overlay::text_scroll::animate_tip_text;
 use crate::sensation::tip_overlay::view::{
     setup_overlay, sync_icon_placeholder, sync_notice, sync_overlay_hit_test,
@@ -18,7 +18,10 @@ use crate::sensation::tip_overlay::view::{
 };
 use crate::sensation::tip_overlay::visual_config::RotationNoticeVisualConfig;
 use bevy::prelude::*;
-use bevy::{animation::{advance_animations, animate_targets}, transform::TransformSystems};
+use bevy::{
+    animation::{advance_animations, animate_targets},
+    transform::TransformSystems,
+};
 
 pub(super) fn configure(app: &mut App) {
     #[cfg(target_os = "windows")]

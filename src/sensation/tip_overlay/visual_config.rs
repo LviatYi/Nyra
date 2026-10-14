@@ -78,10 +78,7 @@ impl RotationNoticeVisualConfig {
     }
 }
 
-pub(super) fn layer_sprite(
-    asset: Option<&LayerAsset>,
-    size: Vec2,
-) -> SpriteTemplate {
+pub(super) fn layer_sprite(asset: Option<&LayerAsset>, size: Vec2) -> SpriteTemplate {
     let Some(asset) = asset.filter(|asset| !asset.path.trim().is_empty()) else {
         return SpriteTemplate {
             custom_size: Some(size),

@@ -6,8 +6,8 @@ use super::{
 use crate::controller::ActiveJobState;
 use crate::job::JobConfig;
 use bevy::{
-    animation::{AnimatedBy, AnimationTargetId, animated_field},
     animation::graph::AnimationNodeIndex,
+    animation::{AnimatedBy, AnimationTargetId, animated_field},
     curve::{FunctionCurve, Interval},
     prelude::*,
 };
@@ -102,7 +102,9 @@ pub(super) fn setup_border_animations(
         fill_target,
         AnimatableCurve::new(
             animated_field!(BorderFillValue::progress),
-            FunctionCurve::new(Interval::UNIT, move |time| sample_keyframes(&fill_frames, time)),
+            FunctionCurve::new(Interval::UNIT, move |time| {
+                sample_keyframes(&fill_frames, time)
+            }),
         ),
     );
     let (fill_graph, fill_node) = AnimationGraph::from_clip(clips.add(fill_clip));
@@ -120,7 +122,9 @@ pub(super) fn setup_border_animations(
         drain_target,
         AnimatableCurve::new(
             animated_field!(BorderDrainValue::progress),
-            FunctionCurve::new(Interval::UNIT, move |time| sample_keyframes(&drain_frames, time)),
+            FunctionCurve::new(Interval::UNIT, move |time| {
+                sample_keyframes(&drain_frames, time)
+            }),
         ),
     );
     let (drain_graph, drain_node) = AnimationGraph::from_clip(clips.add(drain_clip));
@@ -142,8 +146,14 @@ pub(super) fn sync_border_playback(
     jobs: Res<JobConfig>,
     motion: Res<BorderMotion>,
     nodes: Res<BorderAnimationNodes>,
-    mut fill_player: Single<&mut AnimationPlayer, (With<BorderFillValue>, Without<BorderDrainValue>)>,
-    mut drain_player: Single<&mut AnimationPlayer, (With<BorderDrainValue>, Without<BorderFillValue>)>,
+    mut fill_player: Single<
+        &mut AnimationPlayer,
+        (With<BorderFillValue>, Without<BorderDrainValue>),
+    >,
+    mut drain_player: Single<
+        &mut AnimationPlayer,
+        (With<BorderDrainValue>, Without<BorderFillValue>),
+    >,
     mut fill_value: Single<&mut BorderFillValue>,
     mut drain_value: Single<&mut BorderDrainValue>,
     outgoing_material: Single<&MeshMaterial2d<ColorMaterial>, With<BorderOutgoing>>,
@@ -215,7 +225,7 @@ pub(super) fn sync_border_playback(
     if let Some(started_at) = playback.draining_since {
         let fraction = (now.saturating_sub(started_at).as_secs_f32()
             / playback.drain_duration.as_secs_f32())
-            .clamp(0.0, 1.0);
+        .clamp(0.0, 1.0);
         if fraction >= 1.0 {
             drain_player.stop_all();
             drain_value.progress = 1.0;

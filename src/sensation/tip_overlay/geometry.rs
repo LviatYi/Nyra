@@ -79,9 +79,11 @@ impl BorderGeometry {
         if definition.points.len() < 3 {
             return Err("path needs at least three vertices".into());
         }
-        if definition.outer_points.as_ref().is_some_and(|outer| {
-            outer.len() != definition.points.len()
-        }) {
+        if definition
+            .outer_points
+            .as_ref()
+            .is_some_and(|outer| outer.len() != definition.points.len())
+        {
             return Err("inner and outer contours must have matching vertex counts".into());
         }
         let points = definition

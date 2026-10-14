@@ -323,9 +323,7 @@ fn run(
 
 #[cfg(target_os = "windows")]
 fn overlay_canvas_size() -> (u32, u32) {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
-    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 
     let width = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(WINDOW_WIDTH as i32) as u32;
     let height = unsafe { GetSystemMetrics(SM_CYSCREEN) }.max(WINDOW_HEIGHT as i32) as u32;

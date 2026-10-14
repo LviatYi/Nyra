@@ -13,6 +13,8 @@ use crate::{
     job::JobConfig,
     settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH},
 };
+#[cfg(target_os = "windows")]
+use bevy::window::RawHandleWrapper;
 use bevy::{
     asset::asset_value,
     picking::pointer::PointerId,
@@ -21,8 +23,6 @@ use bevy::{
     text::{FontSourceTemplate, GenericFontFamily},
     window::{CursorMoved, CursorOptions, PrimaryWindow, WindowEvent, WindowPosition},
 };
-#[cfg(target_os = "windows")]
-use bevy::window::RawHandleWrapper;
 #[cfg(target_os = "windows")]
 use raw_window_handle::RawWindowHandle;
 #[cfg(target_os = "windows")]
@@ -56,10 +56,7 @@ pub(super) struct IconArt {
     has_source: bool,
 }
 
-pub(super) fn setup_overlay(
-    mut commands: Commands,
-    visuals: Res<RotationNoticeVisualConfig>,
-) {
+pub(super) fn setup_overlay(mut commands: Commands, visuals: Res<RotationNoticeVisualConfig>) {
     let border_width = if visuals.border_width.is_finite()
         && visuals.border_width > 0.0
         && visuals.border_width < WINDOW_HEIGHT as f32 / 4.0
@@ -308,14 +305,17 @@ pub(super) fn mark_overlay_window_non_rude(
 
     // Windows must see this property before the full-screen-sized window is shown.
     if unsafe { SetPropW(hwnd, NON_RUDE_HWND, 1 as *mut _) } == 0 {
-        panic!("Could not set NonRudeHWND: {}", std::io::Error::last_os_error());
+        panic!(
+            "Could not set NonRudeHWND: {}",
+            std::io::Error::last_os_error()
+        );
     }
 }
 
 #[cfg(target_os = "windows")]
 pub(super) fn unmark_overlay_window_non_rude(
     event: On<Remove<RawHandleWrapper>>,
-    windows: Query<&RawHandleWrapper,With<PrimaryWindow>>,
+    windows: Query<&RawHandleWrapper, With<PrimaryWindow>>,
 ) {
     let Ok(handle) = windows.get(event.entity) else {
         return;
@@ -373,9 +373,7 @@ fn end_notice_drag(
     mut placement: ResMut<NoticePlacement>,
     mut capture_map: ResMut<PointerCaptureMap>,
 ) {
-    if event.button == PointerButton::Primary
-        && placement.drag_pointer == Some(event.pointer.id)
-    {
+    if event.button == PointerButton::Primary && placement.drag_pointer == Some(event.pointer.id) {
         placement.drag_pointer = None;
         capture_map.release(event.pointer.id);
     }
@@ -443,7 +441,8 @@ pub(super) fn sync_overlay_hit_test(
     let notice_half_size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32) * 0.5;
 
     // Keep picking's mouse position current while the native window passes clicks through.
-    if state.active_job.is_some() && !cursor_options.hit_test
+    if state.active_job.is_some()
+        && !cursor_options.hit_test
         && let Some(position) = cursor
     {
         window_events.write(WindowEvent::CursorMoved(CursorMoved {
@@ -477,8 +476,7 @@ fn cursor_in_window(window: &Window) -> Option<Vec2> {
     let cursor = (Vec2::new(point.x as f32, point.y as f32) - origin.as_vec2())
         / window.resolution.scale_factor() as f32;
     let size = window.resolution.size();
-    (cursor.x >= 0.0 && cursor.y >= 0.0 && cursor.x < size.x && cursor.y < size.y)
-        .then_some(cursor)
+    (cursor.x >= 0.0 && cursor.y >= 0.0 && cursor.x < size.x && cursor.y < size.y).then_some(cursor)
 }
 
 #[cfg(not(target_os = "windows"))]

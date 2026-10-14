@@ -38,17 +38,21 @@ impl BorderMotion {
         let motion: Self = serde_json::from_str(source).map_err(|error| error.to_string())?;
         for frames in [&motion.fill, &motion.drain] {
             if frames.len() < 2
-                || frames.first().is_none_or(|frame| frame.time != 0.0 || frame.value != 0.0)
-                || frames.last().is_none_or(|frame| frame.time != 1.0 || frame.value != 1.0)
+                || frames
+                    .first()
+                    .is_none_or(|frame| frame.time != 0.0 || frame.value != 0.0)
+                || frames
+                    .last()
+                    .is_none_or(|frame| frame.time != 1.0 || frame.value != 1.0)
                 || frames.iter().any(|frame| {
                     !frame.time.is_finite()
                         || !frame.value.is_finite()
                         || !frame.velocity.is_finite()
                         || !(0.0..=1.0).contains(&frame.value)
                 })
-                || frames.windows(2).any(|pair| {
-                    pair[0].time >= pair[1].time || pair[0].value > pair[1].value
-                })
+                || frames
+                    .windows(2)
+                    .any(|pair| pair[0].time >= pair[1].time || pair[0].value > pair[1].value)
             {
                 return Err("motion keyframes must run from (0, 0) to (1, 1)".into());
             }
