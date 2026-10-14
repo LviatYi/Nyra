@@ -29,7 +29,7 @@ impl BorderProgress {
         self.geometry.progress_range_mesh(start, 1.0)
     }
 
-    pub(super) fn head_position(&self) -> Option<Vec2> {
+    pub(super) fn head_position(&self) -> Vec2 {
         self.geometry.progress_head(self.progress)
     }
 }
@@ -78,27 +78,27 @@ pub(super) struct BorderTransition {
     drain_duration: Duration,
 }
 
-pub(super) fn 
-update_countdown(
+pub(super) fn update_countdown(
     time: Res<Time<Real>>,
     state: Res<ActiveJobState>,
     jobs: Res<JobConfig>,
-    border: Single<(Entity, &mut BorderProgress, &Mesh2d)>,
-    outgoing: Single<(Entity, &Mesh2d, &MeshMaterial2d<ColorMaterial>), With<BorderOutgoing>>,
-    head: Single<(Entity, &mut Transform), With<BorderHead>>,
-    mut visibilities: Query<&mut Visibility>,
+    border: Single<(&mut BorderProgress, &Mesh2d)>,
+    outgoing: Single<(&Mesh2d, &MeshMaterial2d<ColorMaterial>), With<BorderOutgoing>>,
+    head: Single<&mut Transform, With<BorderHead>>,
     mut label: Single<&mut Text, With<CountdownText>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut transition: Local<BorderTransition>,
 ) {
-    let (border_entity, mut border, mesh_handle) = border.into_inner();
-    let (outgoing_entity, outgoing_mesh, outgoing_material) = outgoing.into_inner();
+    let (mut border, mesh_handle) = border.into_inner();
+    let (outgoing_mesh, outgoing_material) = outgoing.into_inner();
     let Some(active_job) = state.active_job.as_ref() else {
         transition.previous_job = None;
-        transition.draining_since = None;
-        *visibilities.get_mut(border_entity).unwrap() = Visibility::Hidden;
-        *visibilities.get_mut(outgoing_entity).unwrap() = Visibility::Hidden;
+        if transition.draining_since.take().is_some()
+            && let Some(mut mesh) = meshes.get_mut(&outgoing_mesh.0)
+        {
+            *mesh = border.outgoing_mesh(1.0);
+        }
         return;
     };
     let now = time.elapsed();
@@ -109,7 +109,6 @@ update_countdown(
             || previous.started_at != active_job.started_at)
     {
         transition.draining_since = None;
-        *visibilities.get_mut(outgoing_entity).unwrap() = Visibility::Hidden;
         let max_drain_duration = Duration::from_millis(180);
         let drain_duration = countdown
             .map(|(_, total)| max_drain_duration.min(total / 4))
@@ -122,6 +121,8 @@ update_countdown(
                 &outgoing_material.0,
                 tip_color(&jobs, previous.index),
             );
+        } else if let Some(mut mesh) = meshes.get_mut(&outgoing_mesh.0) {
+            *mesh = border.outgoing_mesh(1.0);
         }
     }
     transition.previous_job = Some(PreviousJob {
@@ -133,14 +134,11 @@ update_countdown(
         let fraction = (now.saturating_sub(started_at).as_secs_f32()
             / transition.drain_duration.as_secs_f32())
         .clamp(0.0, 1.0);
+        if let Some(mut mesh) = meshes.get_mut(&outgoing_mesh.0) {
+            *mesh = border.outgoing_mesh(fraction);
+        }
         if fraction >= 1.0 {
             transition.draining_since = None;
-            *visibilities.get_mut(outgoing_entity).unwrap() = Visibility::Hidden;
-        } else {
-            if let Some(mut mesh) = meshes.get_mut(&outgoing_mesh.0) {
-                *mesh = border.outgoing_mesh(fraction);
-            }
-            *visibilities.get_mut(outgoing_entity).unwrap() = Visibility::Visible;
         }
     }
     let (progress, caption) = match countdown {
@@ -161,23 +159,12 @@ update_countdown(
     }
     if border.progress != progress {
         border.progress = progress;
-        if progress > 0.0 {
-            if let Some(mut mesh) = meshes.get_mut(&mesh_handle.0) {
-                *mesh = border.mesh();
-            }
+        if let Some(mut mesh) = meshes.get_mut(&mesh_handle.0) {
+            *mesh = border.mesh();
         }
     }
-    *visibilities.get_mut(border_entity).unwrap() = if progress > 0.0 {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    };
-    let (head_entity, mut head_transform) = head.into_inner();
-    if let Some(position) = border.head_position() {
-        head_transform.translation.x = position.x;
-        head_transform.translation.y = position.y;
-        *visibilities.get_mut(head_entity).unwrap() = Visibility::Visible;
-    } else {
-        *visibilities.get_mut(head_entity).unwrap() = Visibility::Hidden;
-    }
+    let position = border.head_position();
+    let mut head_transform = head.into_inner();
+    head_transform.translation.x = position.x;
+    head_transform.translation.y = position.y;
 }

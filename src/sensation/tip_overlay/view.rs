@@ -71,7 +71,7 @@ pub(super) fn setup_overlay(
     let geometry = BorderGeometry::load(visuals.border_path.as_deref(), border_width);
     let track_mesh = geometry.progress_mesh(1.0);
     let border = BorderProgress::new(geometry);
-    let head_position = border.head_position().unwrap_or(Vec2::ZERO);
+    let head_position = border.head_position();
     let icon_center_x = -(WINDOW_WIDTH as f32) / 2.0 + 30.0;
 
     commands.insert_resource(NoticePlacement::default());
@@ -116,20 +116,18 @@ pub(super) fn setup_overlay(
             Transform::from_xyz(0.0, 0.0, 1.9)
             BorderTrack
             --
-            Mesh2d({asset_value(border.outgoing_mesh(0.0))})
+            Mesh2d({asset_value(border.outgoing_mesh(1.0))})
             MeshMaterial2d<ColorMaterial>(asset_value(color_material(Color::NONE)))
             Transform::from_xyz(0.0, 0.0, 1.95)
-            Visibility::Hidden
             BorderOutgoing
             --
-            Mesh2d({asset_value(border.outgoing_mesh(0.0))})
+            Mesh2d({asset_value(border.mesh())})
             MeshMaterial2d<ColorMaterial>(asset_value(color_material(Color::NONE)))
             Transform::from_xyz(0.0, 0.0, 2.0)
-            Visibility::Hidden
             border
             --
             Transform::from_xyz(head_position.x, head_position.y, 2.1)
-            Visibility::Hidden
+            Visibility::Visible
             BorderHead
             Children [
                 Mesh2d({asset_value(Mesh::from(Circle::new(2.5)))})

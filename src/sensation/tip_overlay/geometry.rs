@@ -172,7 +172,14 @@ impl BorderGeometry {
         let start_distance = start.clamp(0.0, 1.0) * self.total_length;
         let end_distance = end.clamp(0.0, 1.0) * self.total_length;
         if start_distance >= end_distance {
-            return triangle_mesh(Vec::new(), Vec::new());
+            let point = self.pair_at(start_distance);
+            return triangle_mesh(
+                vec![
+                    [point.inner.x, point.inner.y, 0.0],
+                    [point.outer.x, point.outer.y, 0.0],
+                ],
+                Vec::new(),
+            );
         }
         let first_inside = self
             .cumulative_lengths
@@ -215,12 +222,9 @@ impl BorderGeometry {
         triangle_mesh(positions, indices)
     }
 
-    pub(super) fn progress_head(&self, progress: f32) -> Option<Vec2> {
-        if progress <= 0.0 {
-            return None;
-        }
+    pub(super) fn progress_head(&self, progress: f32) -> Vec2 {
         let pair = self.pair_at(progress.clamp(0.0, 1.0) * self.total_length);
-        Some((pair.inner + pair.outer) * 0.5)
+        (pair.inner + pair.outer) * 0.5
     }
 
     fn pair_at(&self, distance: f32) -> BorderVertexPair {
