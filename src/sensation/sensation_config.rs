@@ -62,7 +62,7 @@ impl Default for SensationConfig {
 }
 
 #[derive(Default, TypePath)]
-pub(super) struct SensationConfigLoader;
+pub(in crate::sensation) struct SensationConfigLoader;
 
 impl AssetLoader for SensationConfigLoader {
     type Asset = SensationConfig;
@@ -86,20 +86,20 @@ impl AssetLoader for SensationConfigLoader {
 }
 
 #[derive(Resource)]
-pub(super) struct SensationConfigHandle {
+pub(in crate::sensation) struct SensationConfigHandle {
     handle: Handle<SensationConfig>,
     fallback: SensationConfig,
 }
 
 impl SensationConfigHandle {
-    pub(super) fn load(asset_server: &AssetServer) -> Self {
+    pub(in crate::sensation) fn load(asset_server: &AssetServer) -> Self {
         Self {
             handle: asset_server.load(VISUAL_CONFIG_PATH),
             fallback: SensationConfig::default(),
         }
     }
 
-    pub(super) fn resolve<'a>(
+    pub(in crate::sensation) fn resolve<'a>(
         &'a self,
         assets: &'a Assets<SensationConfig>,
         asset_server: &AssetServer,
@@ -109,16 +109,19 @@ impl SensationConfigHandle {
                 asset_server.get_load_state(self.handle.id()),
                 Some(LoadState::Failed(_))
             )
-                .then_some(&self.fallback)
+            .then_some(&self.fallback)
         })
     }
 }
 
-pub(super) fn load_visual_config(mut commands: Commands, asset_server: Res<AssetServer>) {
+pub(in crate::sensation) fn load_sensation_config(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+) {
     commands.insert_resource(SensationConfigHandle::load(&asset_server));
 }
 
-pub(super) fn layer_sprite(asset: Option<&LayerAsset>, size: Vec2) -> SpriteTemplate {
+pub(in crate::sensation) fn layer_sprite(asset: Option<&LayerAsset>, size: Vec2) -> SpriteTemplate {
     let Some(asset) = asset.filter(|asset| !asset.path.trim().is_empty()) else {
         return SpriteTemplate {
             custom_size: Some(size),
@@ -144,7 +147,7 @@ pub(super) fn layer_sprite(asset: Option<&LayerAsset>, size: Vec2) -> SpriteTemp
     }
 }
 
-pub(super) fn layer_color(asset: Option<&LayerAsset>, theme: Color) -> Color {
+pub(in crate::sensation) fn layer_color(asset: Option<&LayerAsset>, theme: Color) -> Color {
     let Some(asset) = asset.filter(|asset| !asset.path.trim().is_empty()) else {
         return Color::NONE;
     };

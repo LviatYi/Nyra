@@ -1,3 +1,4 @@
+mod sensation_config;
 pub mod tip_overlay;
 
 use bevy::prelude::*;

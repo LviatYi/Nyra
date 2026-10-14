@@ -6,7 +6,9 @@ use super::{
     },
     style::{border_track_color, color_material, set_material_color, tip_color},
     text_scroll::{TextScroll, TipTextViewport},
-    visual_config::{SensationConfig, SensationConfigHandle, layer_color, layer_sprite},
+};
+use crate::sensation::sensation_config::{
+    SensationConfig, SensationConfigHandle, layer_color, layer_sprite,
 };
 use crate::{
     controller::ActiveJobState,

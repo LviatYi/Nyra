@@ -4,9 +4,11 @@ mod progress_border;
 mod style;
 mod text_scroll;
 mod view;
-mod visual_config;
 
 use crate::controller::{ActiveJobState, JobProcessing};
+use crate::sensation::sensation_config::{
+    SensationConfig, SensationConfigLoader, load_sensation_config,
+};
 use crate::sensation::tip_overlay::motion::BorderMotion;
 use crate::sensation::tip_overlay::progress_border::{
     BorderAnimationNodes, render_border, setup_border_animations, sync_border_playback,
@@ -16,9 +18,6 @@ use crate::sensation::tip_overlay::text_scroll::animate_tip_text;
 use crate::sensation::tip_overlay::view::{
     NoticePlacement, setup_overlay, sync_icon_placeholder, sync_notice, sync_overlay_hit_test,
     sync_overlay_position, sync_overlay_visibility,
-};
-use crate::sensation::tip_overlay::visual_config::{
-    SensationConfig, SensationConfigLoader, load_visual_config,
 };
 use bevy::prelude::*;
 use bevy::{
@@ -34,7 +33,7 @@ pub(super) fn configure(app: &mut App) {
     app.init_asset::<SensationConfig>()
         .init_asset_loader::<SensationConfigLoader>()
         .insert_resource(BorderMotion::load())
-        .add_systems(Startup, load_visual_config)
+        .add_systems(Startup, load_sensation_config)
         .add_systems(
             PreUpdate,
             (
