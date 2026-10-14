@@ -1,7 +1,8 @@
 use super::{
     geometry::{BorderGeometry, icon_marker_mesh},
     progress_border::{
-        BorderHead, BorderHeadGlow, BorderOutgoing, BorderProgress, BorderTrack, CountdownText,
+        BorderDrainValue, BorderFillValue, BorderHead, BorderHeadGlow, BorderOutgoing,
+        BorderProgress, BorderTrack, CountdownText,
     },
     style::{border_track_color, color_material, set_material_color, tip_color},
     text_scroll::{TextScroll, TipTextViewport},
@@ -71,7 +72,7 @@ pub(super) fn setup_overlay(
     let geometry = BorderGeometry::load(visuals.border_path.as_deref(), border_width);
     let track_mesh = geometry.progress_mesh(1.0);
     let border = BorderProgress::new(geometry);
-    let head_position = border.head_position();
+    let head_position = border.head_position(0.0);
     let icon_center_x = -(WINDOW_WIDTH as f32) / 2.0 + 30.0;
 
     commands.insert_resource(NoticePlacement::default());
@@ -120,11 +121,13 @@ pub(super) fn setup_overlay(
             MeshMaterial2d<ColorMaterial>(asset_value(color_material(Color::NONE)))
             Transform::from_xyz(0.0, 0.0, 1.95)
             BorderOutgoing
+            BorderDrainValue::default()
             --
-            Mesh2d({asset_value(border.mesh())})
+            Mesh2d({asset_value(border.mesh(0.0))})
             MeshMaterial2d<ColorMaterial>(asset_value(color_material(Color::NONE)))
             Transform::from_xyz(0.0, 0.0, 2.0)
             border
+            BorderFillValue::default()
             --
             Transform::from_xyz(head_position.x, head_position.y, 2.1)
             Visibility::Visible
@@ -312,7 +315,7 @@ pub(super) fn mark_overlay_window_non_rude(
 #[cfg(target_os = "windows")]
 pub(super) fn unmark_overlay_window_non_rude(
     event: On<Remove<RawHandleWrapper>>,
-    windows: Query<&RawHandleWrapper>,
+    windows: Query<&RawHandleWrapper,With<PrimaryWindow>>,
 ) {
     let Ok(handle) = windows.get(event.entity) else {
         return;
