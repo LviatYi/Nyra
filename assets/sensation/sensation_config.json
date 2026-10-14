@@ -6,6 +6,5 @@
   },
   "iconBackground": null,
   "borderPath": "sensation/rotation_notice_border.json",
-  "borderWidth": 1,
-  "backgroundOpacity": 1
+  "borderWidth": 1
 }

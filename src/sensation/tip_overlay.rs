@@ -9,14 +9,17 @@ mod visual_config;
 use crate::controller::{ActiveJobState, JobProcessing};
 use crate::sensation::tip_overlay::motion::BorderMotion;
 use crate::sensation::tip_overlay::progress_border::{
-    render_border, setup_border_animations, sync_border_playback, sync_countdown_text,
+    BorderAnimationNodes, render_border, setup_border_animations, sync_border_playback,
+    sync_countdown_text,
 };
 use crate::sensation::tip_overlay::text_scroll::animate_tip_text;
 use crate::sensation::tip_overlay::view::{
-    setup_overlay, sync_icon_placeholder, sync_notice, sync_overlay_hit_test,
+    NoticePlacement, setup_overlay, sync_icon_placeholder, sync_notice, sync_overlay_hit_test,
     sync_overlay_position, sync_overlay_visibility,
 };
-use crate::sensation::tip_overlay::visual_config::RotationNoticeVisualConfig;
+use crate::sensation::tip_overlay::visual_config::{
+    SensationConfig, SensationConfigLoader, load_visual_config,
+};
 use bevy::prelude::*;
 use bevy::{
     animation::{advance_animations, animate_targets},
@@ -28,10 +31,20 @@ pub(super) fn configure(app: &mut App) {
     app.add_observer(view::mark_overlay_window_non_rude)
         .add_observer(view::unmark_overlay_window_non_rude);
 
-    app.insert_resource(RotationNoticeVisualConfig::load())
+    app.init_asset::<SensationConfig>()
+        .init_asset_loader::<SensationConfigLoader>()
         .insert_resource(BorderMotion::load())
-        .add_systems(Startup, setup_overlay)
-        .add_systems(PostStartup, setup_border_animations)
+        .add_systems(Startup, load_visual_config)
+        .add_systems(
+            PreUpdate,
+            (
+                setup_overlay.run_if(not(resource_exists::<NoticePlacement>)),
+                setup_border_animations
+                    .run_if(resource_exists::<NoticePlacement>)
+                    .run_if(not(resource_exists::<BorderAnimationNodes>)),
+            )
+                .chain(),
+        )
         .add_systems(
             Update,
             (
@@ -43,24 +56,28 @@ pub(super) fn configure(app: &mut App) {
                 animate_tip_text,
             )
                 .chain()
-                .after(JobProcessing),
+                .after(JobProcessing)
+                .run_if(resource_exists::<BorderAnimationNodes>),
         )
         .add_systems(
             Update,
             (sync_overlay_position, sync_overlay_hit_test)
                 .chain()
-                .after(JobProcessing),
+                .after(JobProcessing)
+                .run_if(resource_exists::<BorderAnimationNodes>),
         )
         .add_systems(
             PostUpdate,
             sync_border_playback
                 .after(advance_animations)
-                .before(animate_targets),
+                .before(animate_targets)
+                .run_if(resource_exists::<BorderAnimationNodes>),
         )
         .add_systems(
             PostUpdate,
             render_border
                 .after(animate_targets)
-                .before(TransformSystems::Propagate),
+                .before(TransformSystems::Propagate)
+                .run_if(resource_exists::<BorderAnimationNodes>),
         );
 }

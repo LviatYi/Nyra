@@ -6,7 +6,7 @@ use serde::Deserialize;
 use std::{fs, path::Path};
 
 const DEFAULT_BORDER_PATH: &str =
-    include_str!("../../../assets/sensation/rotation_notice_border.json");
+    include_str!("../../../assets/sensation/sensation_tip_overlay_border.json");
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

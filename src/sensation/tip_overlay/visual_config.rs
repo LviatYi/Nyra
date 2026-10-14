@@ -1,11 +1,12 @@
 use bevy::{
+    asset::{AssetLoader, LoadContext, LoadState, io::Reader},
+    ecs::error::BevyError,
     prelude::*,
     sprite::{BorderRect, SpriteImageMode, SpriteTemplate, TextureSlicer},
 };
 use serde::Deserialize;
-use std::fs;
 
-const VISUAL_CONFIG_PATH: &str = "assets/sensation/rotation_notice_visual.json";
+const VISUAL_CONFIG_PATH: &str = "sensation/sensation_config.json";
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -35,17 +36,16 @@ pub enum LayerSizing {
     },
 }
 
-#[derive(Resource, Deserialize)]
+#[derive(Asset, TypePath, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RotationNoticeVisualConfig {
+pub struct SensationConfig {
     pub base_background: Option<LayerAsset>,
     pub icon_background: Option<LayerAsset>,
     pub border_path: Option<String>,
     pub border_width: f32,
-    pub background_opacity: f32,
 }
 
-impl Default for RotationNoticeVisualConfig {
+impl Default for SensationConfig {
     fn default() -> Self {
         Self {
             base_background: Some(LayerAsset {
@@ -55,27 +55,67 @@ impl Default for RotationNoticeVisualConfig {
                 sizing: LayerSizing::Stretch,
             }),
             icon_background: None,
-            border_path: Some("sensation/rotation_notice_border.json".into()),
+            border_path: Some("sensation/sensation_tip_overlay_border.json".into()),
             border_width: 1.0,
-            background_opacity: 1.0,
         }
     }
 }
 
-impl RotationNoticeVisualConfig {
-    pub(super) fn load() -> Self {
-        let source = match fs::read_to_string(VISUAL_CONFIG_PATH) {
-            Ok(source) => source,
-            Err(error) => {
-                eprintln!("[Sensation] {VISUAL_CONFIG_PATH}: {error}; using built-in visuals");
-                return Self::default();
-            }
-        };
-        serde_json::from_str::<Self>(&source).unwrap_or_else(|error| {
-            eprintln!("[Sensation] {VISUAL_CONFIG_PATH}: {error}; using built-in visuals");
-            Self::default()
+#[derive(Default, TypePath)]
+pub(super) struct SensationConfigLoader;
+
+impl AssetLoader for SensationConfigLoader {
+    type Asset = SensationConfig;
+    type Settings = ();
+    type Error = BevyError;
+
+    async fn load(
+        &self,
+        reader: &mut dyn Reader,
+        _settings: &Self::Settings,
+        _load_context: &mut LoadContext<'_>,
+    ) -> Result<Self::Asset, Self::Error> {
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await?;
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["json"]
+    }
+}
+
+#[derive(Resource)]
+pub(super) struct SensationConfigHandle {
+    handle: Handle<SensationConfig>,
+    fallback: SensationConfig,
+}
+
+impl SensationConfigHandle {
+    pub(super) fn load(asset_server: &AssetServer) -> Self {
+        Self {
+            handle: asset_server.load(VISUAL_CONFIG_PATH),
+            fallback: SensationConfig::default(),
+        }
+    }
+
+    pub(super) fn resolve<'a>(
+        &'a self,
+        assets: &'a Assets<SensationConfig>,
+        asset_server: &AssetServer,
+    ) -> Option<&'a SensationConfig> {
+        assets.get(&self.handle).or_else(|| {
+            matches!(
+                asset_server.get_load_state(self.handle.id()),
+                Some(LoadState::Failed(_))
+            )
+                .then_some(&self.fallback)
         })
     }
+}
+
+pub(super) fn load_visual_config(mut commands: Commands, asset_server: Res<AssetServer>) {
+    commands.insert_resource(SensationConfigHandle::load(&asset_server));
 }
 
 pub(super) fn layer_sprite(asset: Option<&LayerAsset>, size: Vec2) -> SpriteTemplate {
@@ -104,11 +144,11 @@ pub(super) fn layer_sprite(asset: Option<&LayerAsset>, size: Vec2) -> SpriteTemp
     }
 }
 
-pub(super) fn layer_color(asset: Option<&LayerAsset>, theme: Color, global_opacity: f32) -> Color {
+pub(super) fn layer_color(asset: Option<&LayerAsset>, theme: Color) -> Color {
     let Some(asset) = asset.filter(|asset| !asset.path.trim().is_empty()) else {
         return Color::NONE;
     };
-    let opacity = (asset.opacity * global_opacity).clamp(0.0, 1.0);
+    let opacity = asset.opacity.clamp(0.0, 1.0);
     if asset.tint_with_theme {
         let theme = theme.to_srgba();
         Color::srgba(theme.red, theme.green, theme.blue, opacity)

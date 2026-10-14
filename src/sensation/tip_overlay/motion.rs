@@ -2,8 +2,8 @@ use bevy::prelude::*;
 use serde::Deserialize;
 use std::{fs, time::Duration};
 
-const MOTION_PATH: &str = "assets/sensation/rotation_notice_motion.json";
-const DEFAULT_MOTION: &str = include_str!("../../../assets/sensation/rotation_notice_motion.json");
+const MOTION_PATH: &str = "assets/sensation/sensation_tip_overlay_motion.json";
+const DEFAULT_MOTION: &str = include_str!("../../../assets/sensation/sensation_tip_overlay_motion.json");
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]

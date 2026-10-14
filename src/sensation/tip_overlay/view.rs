@@ -6,7 +6,7 @@ use super::{
     },
     style::{border_track_color, color_material, set_material_color, tip_color},
     text_scroll::{TextScroll, TipTextViewport},
-    visual_config::{RotationNoticeVisualConfig, layer_color, layer_sprite},
+    visual_config::{SensationConfig, SensationConfigHandle, layer_color, layer_sprite},
 };
 use crate::{
     controller::ActiveJobState,
@@ -56,7 +56,15 @@ pub(super) struct IconArt {
     has_source: bool,
 }
 
-pub(super) fn setup_overlay(mut commands: Commands, visuals: Res<RotationNoticeVisualConfig>) {
+pub(super) fn setup_overlay(
+    mut commands: Commands,
+    config: Res<SensationConfigHandle>,
+    visual_assets: Res<Assets<SensationConfig>>,
+    asset_server: Res<AssetServer>,
+) {
+    let Some(visuals) = config.resolve(&visual_assets, &asset_server) else {
+        return;
+    };
     let border_width = if visuals.border_width.is_finite()
         && visuals.border_width > 0.0
         && visuals.border_width < WINDOW_HEIGHT as f32 / 4.0
@@ -214,7 +222,8 @@ pub(super) fn setup_overlay(mut commands: Commands, visuals: Res<RotationNoticeV
 pub(super) fn sync_notice(
     jobs: Res<JobConfig>,
     state: Res<ActiveJobState>,
-    visuals: Res<RotationNoticeVisualConfig>,
+    config: Res<SensationConfigHandle>,
+    visual_assets: Res<Assets<SensationConfig>>,
     asset_server: Res<AssetServer>,
     mut text: Single<&mut Text, With<TipText>>,
     mut countdown_color: Single<&mut TextColor, With<CountdownText>>,
@@ -236,6 +245,9 @@ pub(super) fn sync_notice(
     let Some(active) = state.active_job.as_ref() else {
         return;
     };
+    let Some(visuals) = config.resolve(&visual_assets, &asset_server) else {
+        return;
+    };
     let tip = jobs.0.jobs[active.current_index].tip();
     let theme = tip_color(&jobs, active.current_index);
     let content = tip.text.replace(['\r', '\n'], " ");
@@ -245,17 +257,9 @@ pub(super) fn sync_notice(
     countdown_color.0 = theme;
     for (mut sprite, base_art, icon_background, icon_art) in &mut sprites {
         if base_art.is_some() {
-            sprite.color = layer_color(
-                visuals.base_background.as_ref(),
-                theme,
-                visuals.background_opacity,
-            );
+            sprite.color = layer_color(visuals.base_background.as_ref(), theme);
         } else if icon_background.is_some() {
-            sprite.color = layer_color(
-                visuals.icon_background.as_ref(),
-                theme,
-                visuals.background_opacity,
-            );
+            sprite.color = layer_color(visuals.icon_background.as_ref(), theme);
         } else if let Some(mut icon_art) = icon_art {
             let icon_path = tip.icon.as_deref().filter(|path| !path.trim().is_empty());
             icon_art.has_source = icon_path.is_some();
