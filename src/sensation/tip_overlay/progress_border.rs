@@ -1,6 +1,6 @@
 use super::{
     geometry::BorderGeometry,
-    motion::{BorderMotion, sample_keyframes},
+    motion::{DRAIN_DURATION, fill_curve},
     style::{set_material_color, tip_color},
 };
 use crate::controller::ActiveJobState;
@@ -78,7 +78,6 @@ struct PreviousJob {
 pub(super) struct BorderPlayback {
     previous_job: Option<PreviousJob>,
     draining_since: Option<Duration>,
-    drain_duration: Duration,
 }
 
 #[derive(Resource)]
@@ -89,7 +88,6 @@ pub(super) struct BorderAnimationNodes {
 
 pub(super) fn setup_border_animations(
     mut commands: Commands,
-    motion: Res<BorderMotion>,
     mut clips: ResMut<Assets<AnimationClip>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
     fill_entity: Single<Entity, With<BorderFillValue>>,
@@ -97,15 +95,9 @@ pub(super) fn setup_border_animations(
 ) {
     let fill_target = AnimationTargetId::from_name(&Name::new("BorderFill"));
     let mut fill_clip = AnimationClip::default();
-    let fill_frames = motion.fill.clone();
     fill_clip.add_curve_to_target(
         fill_target,
-        AnimatableCurve::new(
-            animated_field!(BorderFillValue::progress),
-            FunctionCurve::new(Interval::UNIT, move |time| {
-                sample_keyframes(&fill_frames, time)
-            }),
-        ),
+        AnimatableCurve::new(animated_field!(BorderFillValue::progress), fill_curve()),
     );
     let (fill_graph, fill_node) = AnimationGraph::from_clip(clips.add(fill_clip));
     commands.entity(*fill_entity).insert((
@@ -141,7 +133,6 @@ pub(super) fn sync_border_playback(
     time: Res<Time<Real>>,
     state: Res<ActiveJobState>,
     jobs: Res<JobConfig>,
-    motion: Res<BorderMotion>,
     nodes: Res<BorderAnimationNodes>,
     mut fill_player: Single<
         &mut AnimationPlayer,
@@ -187,13 +178,11 @@ pub(super) fn sync_border_playback(
         drain_player.stop_all();
         drain_value.progress = 1.0;
         playback.draining_since = None;
-        let drain_duration = motion.drain_duration();
         if let Some(previous) = playback.previous_job
             && previous.ends_at.is_some_and(|end| now >= end)
-            && countdown.is_none_or(|(_, total)| drain_duration <= total)
+            && countdown.is_none_or(|(_, total)| DRAIN_DURATION <= total)
         {
             playback.draining_since = Some(now);
-            playback.drain_duration = drain_duration;
             drain_value.progress = 0.0;
             drain_player.start(nodes.drain).pause();
             set_material_color(
@@ -221,7 +210,7 @@ pub(super) fn sync_border_playback(
 
     if let Some(started_at) = playback.draining_since {
         let fraction = (now.saturating_sub(started_at).as_secs_f32()
-            / playback.drain_duration.as_secs_f32())
+            / DRAIN_DURATION.as_secs_f32())
         .clamp(0.0, 1.0);
         if fraction >= 1.0 {
             drain_player.stop_all();
