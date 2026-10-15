@@ -15,8 +15,6 @@ use crate::{
     job::JobConfig,
     settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH},
 };
-#[cfg(target_os = "windows")]
-use bevy::window::RawHandleWrapper;
 use bevy::{
     asset::asset_value,
     picking::pointer::PointerId,
@@ -25,13 +23,6 @@ use bevy::{
     text::{FontSourceTemplate, GenericFontFamily},
     window::{CursorMoved, CursorOptions, PrimaryWindow, WindowEvent, WindowPosition},
 };
-#[cfg(target_os = "windows")]
-use raw_window_handle::RawWindowHandle;
-#[cfg(target_os = "windows")]
-use windows_sys::Win32::UI::WindowsAndMessaging::{RemovePropW, SetPropW};
-
-#[cfg(target_os = "windows")]
-const NON_RUDE_HWND: windows_sys::core::PCWSTR = windows_sys::core::w!("NonRudeHWND");
 
 #[derive(Resource, Default)]
 pub(super) struct NoticePlacement {
@@ -294,41 +285,6 @@ pub(super) fn sync_overlay_visibility(
     mut window: Single<&mut Window, With<PrimaryWindow>>,
 ) {
     window.visible = state.active_job.is_some();
-}
-
-#[cfg(target_os = "windows")]
-pub(super) fn mark_overlay_window_non_rude(
-    event: On<Insert<RawHandleWrapper>>,
-    windows: Query<&RawHandleWrapper, With<PrimaryWindow>>,
-) {
-    let Ok(handle) = windows.get(event.entity) else {
-        return;
-    };
-    let RawWindowHandle::Win32(raw) = handle.get_window_handle() else {
-        panic!("Primary window has no Win32 handle");
-    };
-    let hwnd = raw.hwnd.get() as *mut _;
-
-    // Windows must see this property before the full-screen-sized window is shown.
-    if unsafe { SetPropW(hwnd, NON_RUDE_HWND, 1 as *mut _) } == 0 {
-        panic!(
-            "Could not set NonRudeHWND: {}",
-            std::io::Error::last_os_error()
-        );
-    }
-}
-
-#[cfg(target_os = "windows")]
-pub(super) fn unmark_overlay_window_non_rude(
-    event: On<Remove<RawHandleWrapper>>,
-    windows: Query<&RawHandleWrapper, With<PrimaryWindow>>,
-) {
-    let Ok(handle) = windows.get(event.entity) else {
-        return;
-    };
-    if let RawWindowHandle::Win32(raw) = handle.get_window_handle() {
-        unsafe { RemovePropW(raw.hwnd.get() as *mut _, NON_RUDE_HWND) };
-    }
 }
 
 pub(super) fn sync_icon_placeholder(

@@ -6,9 +6,6 @@ mod text_scroll;
 mod view;
 
 use crate::controller::{ActiveJobState, JobProcessing};
-use crate::sensation::sensation_config::{
-    SensationConfig, SensationConfigLoader, load_sensation_config,
-};
 use crate::sensation::tip_overlay::motion::BorderMotion;
 use crate::sensation::tip_overlay::progress_border::{
     BorderAnimationNodes, render_border, setup_border_animations, sync_border_playback,
@@ -19,21 +16,12 @@ use crate::sensation::tip_overlay::view::{
     NoticePlacement, setup_overlay, sync_icon_placeholder, sync_notice, sync_overlay_hit_test,
     sync_overlay_position, sync_overlay_visibility,
 };
+use bevy::animation::{advance_animations, animate_targets};
+use bevy::app::{App, PostUpdate, PreUpdate, Update};
 use bevy::prelude::*;
-use bevy::{
-    animation::{advance_animations, animate_targets},
-    transform::TransformSystems,
-};
 
 pub(super) fn configure(app: &mut App) {
-    #[cfg(target_os = "windows")]
-    app.add_observer(view::mark_overlay_window_non_rude)
-        .add_observer(view::unmark_overlay_window_non_rude);
-
-    app.init_asset::<SensationConfig>()
-        .init_asset_loader::<SensationConfigLoader>()
-        .insert_resource(BorderMotion::load())
-        .add_systems(Startup, load_sensation_config)
+    app.insert_resource(BorderMotion::load())
         .add_systems(
             PreUpdate,
             (
