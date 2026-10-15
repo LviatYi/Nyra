@@ -117,14 +117,11 @@ pub(super) fn setup_border_animations(
 
     let drain_target = AnimationTargetId::from_name(&Name::new("BorderDrain"));
     let mut drain_clip = AnimationClip::default();
-    let drain_frames = motion.drain.clone();
     drain_clip.add_curve_to_target(
         drain_target,
         AnimatableCurve::new(
             animated_field!(BorderDrainValue::progress),
-            FunctionCurve::new(Interval::UNIT, move |time| {
-                sample_keyframes(&drain_frames, time)
-            }),
+            FunctionCurve::new(Interval::UNIT, |time| time),
         ),
     );
     let (drain_graph, drain_node) = AnimationGraph::from_clip(clips.add(drain_clip));
@@ -190,10 +187,10 @@ pub(super) fn sync_border_playback(
         drain_player.stop_all();
         drain_value.progress = 1.0;
         playback.draining_since = None;
-        let drain_duration = motion.drain_duration(countdown.map(|(_, total)| total));
+        let drain_duration = motion.drain_duration();
         if let Some(previous) = playback.previous_job
             && previous.ends_at.is_some_and(|end| now >= end)
-            && !drain_duration.is_zero()
+            && countdown.is_none_or(|(_, total)| drain_duration <= total)
         {
             playback.draining_since = Some(now);
             playback.drain_duration = drain_duration;

@@ -16,9 +16,7 @@ pub(super) struct MotionKeyframe {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct BorderMotion {
     pub fill: Vec<MotionKeyframe>,
-    pub drain: Vec<MotionKeyframe>,
-    drain_max_millis: u64,
-    drain_max_next_fraction: f32,
+    drain_millis: u64,
 }
 
 impl BorderMotion {
@@ -30,41 +28,39 @@ impl BorderMotion {
 
     fn parse(source: &str) -> Result<Self, String> {
         let motion: Self = serde_json::from_str(source).map_err(|error| error.to_string())?;
-        for frames in [&motion.fill, &motion.drain] {
-            if frames.len() < 2
-                || frames
-                    .first()
-                    .is_none_or(|frame| frame.time != 0.0 || frame.value != 0.0)
-                || frames
-                    .last()
-                    .is_none_or(|frame| frame.time != 1.0 || frame.value != 1.0)
-                || frames.iter().any(|frame| {
-                    !frame.time.is_finite()
-                        || !frame.value.is_finite()
-                        || !frame.velocity.is_finite()
-                        || !(0.0..=1.0).contains(&frame.value)
-                })
-                || frames
-                    .windows(2)
-                    .any(|pair| pair[0].time >= pair[1].time || pair[0].value > pair[1].value)
-            {
-                return Err("motion keyframes must run from (0, 0) to (1, 1)".into());
-            }
-        }
-        if motion.drain_max_millis == 0
-            || !motion.drain_max_next_fraction.is_finite()
-            || !(0.0..1.0).contains(&motion.drain_max_next_fraction)
+
+        if motion.fill.len() < 2
+            || motion
+                .fill
+                .first()
+                .is_none_or(|frame| frame.time != 0.0 || frame.value != 0.0)
+            || motion
+                .fill
+                .last()
+                .is_none_or(|frame| frame.time != 1.0 || frame.value != 1.0)
+            || motion.fill.iter().any(|frame| {
+                !frame.time.is_finite()
+                    || !frame.value.is_finite()
+                    || !frame.velocity.is_finite()
+                    || !(0.0..=1.0).contains(&frame.value)
+            })
+            || motion
+                .fill
+                .windows(2)
+                .any(|pair| pair[0].time >= pair[1].time || pair[0].value > pair[1].value)
         {
+            return Err("motion keyframes must run from (0, 0) to (1, 1)".into());
+        }
+
+        if motion.drain_millis == 0 {
             return Err("invalid drain duration".into());
         }
+
         Ok(motion)
     }
 
-    pub(super) fn drain_duration(&self, next_duration: Option<Duration>) -> Duration {
-        let maximum = Duration::from_millis(self.drain_max_millis);
-        next_duration
-            .map(|duration| maximum.min(duration.mul_f32(self.drain_max_next_fraction)))
-            .unwrap_or(maximum)
+    pub(super) fn drain_duration(&self) -> Duration {
+        Duration::from_millis(self.drain_millis)
     }
 }
 

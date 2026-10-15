@@ -5,10 +5,5 @@
     { "time": 0.75, "value": 0.8333333, "velocity": 1.3333334 },
     { "time": 1.0, "value": 1.0, "velocity": 0.0 }
   ],
-  "drain": [
-    { "time": 0.0, "value": 0.0, "velocity": 1.0 },
-    { "time": 1.0, "value": 1.0, "velocity": 1.0 }
-  ],
-  "drainMaxMillis": 180,
-  "drainMaxNextFraction": 0.25
+  "drainMillis": 180
 }
