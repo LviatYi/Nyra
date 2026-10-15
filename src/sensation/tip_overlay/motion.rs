@@ -3,8 +3,6 @@ use serde::Deserialize;
 use std::{fs, time::Duration};
 
 const MOTION_PATH: &str = "assets/sensation/sensation_tip_overlay_motion.json";
-const DEFAULT_MOTION: &str =
-    include_str!("../../../assets/sensation/sensation_tip_overlay_motion.json");
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -25,14 +23,9 @@ pub(super) struct BorderMotion {
 
 impl BorderMotion {
     pub(super) fn load() -> Self {
-        let source = fs::read_to_string(MOTION_PATH).unwrap_or_else(|error| {
-            eprintln!("[Sensation] {MOTION_PATH}: {error}; using built-in motion");
-            DEFAULT_MOTION.to_string()
-        });
-        Self::parse(&source).unwrap_or_else(|error| {
-            eprintln!("[Sensation] {MOTION_PATH}: {error}; using built-in motion");
-            Self::parse(DEFAULT_MOTION).expect("built-in border motion must be valid")
-        })
+        let source = fs::read_to_string(MOTION_PATH)
+            .unwrap_or_else(|error| panic!("[Sensation] {MOTION_PATH}: {error}"));
+        Self::parse(&source).unwrap_or_else(|error| panic!("[Sensation] {MOTION_PATH}: {error}"))
     }
 
     fn parse(source: &str) -> Result<Self, String> {
