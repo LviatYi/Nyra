@@ -1,9 +1,8 @@
 mod sensation_config;
 pub mod tip_overlay;
 
-use crate::sensation::sensation_config::{
-    SensationConfig, SensationConfigLoader, load_sensation_config,
-};
+use crate::json_config_loader::JsonConfigLoader;
+use crate::sensation::sensation_config::{SensationConfig, load_sensation_config};
 use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, RawHandleWrapper};
 use raw_window_handle::RawWindowHandle;
@@ -23,7 +22,7 @@ fn configure(app: &mut App) {
         .add_observer(unmark_overlay_window_non_rude);
 
     app.init_asset::<SensationConfig>()
-        .init_asset_loader::<SensationConfigLoader>()
+        .init_asset_loader::<JsonConfigLoader<SensationConfig>>()
         .add_systems(Startup, load_sensation_config);
 
     tip_overlay::configure(app);

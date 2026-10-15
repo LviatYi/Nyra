@@ -1,5 +1,6 @@
 mod controller;
 mod job;
+mod json_config_loader;
 mod perception;
 mod reaction;
 mod sensation;

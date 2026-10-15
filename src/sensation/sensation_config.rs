@@ -1,6 +1,5 @@
 use bevy::{
-    asset::{AssetLoader, LoadContext, LoadState, io::Reader},
-    ecs::error::BevyError,
+    asset::LoadState,
     prelude::*,
     sprite::{BorderRect, SpriteImageMode, SpriteTemplate, TextureSlicer},
 };
@@ -58,30 +57,6 @@ impl Default for SensationConfig {
             border_path: Some("sensation/sensation_tip_overlay_border.json".into()),
             border_width: 1.0,
         }
-    }
-}
-
-#[derive(Default, TypePath)]
-pub(in crate::sensation) struct SensationConfigLoader;
-
-impl AssetLoader for SensationConfigLoader {
-    type Asset = SensationConfig;
-    type Settings = ();
-    type Error = BevyError;
-
-    async fn load(
-        &self,
-        reader: &mut dyn Reader,
-        _settings: &Self::Settings,
-        _load_context: &mut LoadContext<'_>,
-    ) -> Result<Self::Asset, Self::Error> {
-        let mut bytes = Vec::new();
-        reader.read_to_end(&mut bytes).await?;
-        Ok(serde_json::from_slice(&bytes)?)
-    }
-
-    fn extensions(&self) -> &[&str] {
-        &["json"]
     }
 }
 
