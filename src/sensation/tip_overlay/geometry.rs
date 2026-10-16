@@ -55,15 +55,10 @@ impl BorderGeometry {
                 }
             }
         }
-        match Self::parse(DEFAULT_BORDER_PATH, width) {
-            Ok(geometry) => geometry,
-            Err(error) => {
-                eprintln!(
-                    "[Sensation] Built-in border with configured width: {error}; using 2 pixels"
-                );
-                Self::parse(DEFAULT_BORDER_PATH, 2.0).expect("built-in border path must be valid")
-            }
-        }
+        Self::parse(DEFAULT_BORDER_PATH, width).unwrap_or_else(|error| {
+            eprintln!("[Sensation] Built-in border with configured width: {error}; using 2 pixels");
+            Self::parse(DEFAULT_BORDER_PATH, 2.0).expect("built-in border path must be valid")
+        })
     }
 
     fn parse(source: &str, width: f32) -> Result<Self, String> {
