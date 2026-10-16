@@ -5,6 +5,6 @@
     "sizing": { "mode": "stretch" }
   },
   "iconBackground": null,
-  "borderPath": "sensation/rotation_notice_border.json",
+  "borderPath": "sensation/sensation_tip_overlay_border.json",
   "borderWidth": 1
 }
