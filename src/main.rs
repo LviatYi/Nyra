@@ -152,7 +152,7 @@ fn launch() -> Result<(), String> {
         let runner = ReactionRunner::new(&config.reaction, &config_path, scripts)?;
         let hotkeys = GlobalHotkeys::new()?;
         configure_render_environment();
-        run(config.jobs, runner, hotkeys, observer);
+        run(config.jobs, runner, hotkeys, observer)?;
     }
     Ok(())
 }
@@ -268,8 +268,9 @@ fn run(
     runner: ReactionRunner,
     hotkeys: GlobalHotkeys,
     observer: Option<PerceptionObserver>,
-) {
+) -> Result<(), String> {
     let menu_actions = sensation::tip_overlay::MenuActions::default();
+    let menu_keyboard = sensation::tip_overlay::MenuKeyboard::new(menu_actions.shortcut_keys())?;
     let (screen_width, screen_height) = primary_screen_size();
     let mut app = App::new();
     if let Some(observer) = observer {
@@ -280,6 +281,7 @@ fn run(
         .insert_resource(runner)
         .insert_resource(hotkeys)
         .insert_resource(menu_actions)
+        .insert_resource(menu_keyboard)
         .add_plugins(
             DefaultPlugins
                 .set(RenderPlugin {
@@ -316,6 +318,7 @@ fn run(
         .add_plugins(SensoryPlugin)
         .add_plugins(ReactionPlugin)
         .run();
+    Ok(())
 }
 
 fn primary_screen_size() -> (u32, u32) {

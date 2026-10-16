@@ -1,3 +1,4 @@
+use super::menu_keyboard::MenuKeyboard;
 use super::view::{NoticePlacement, cursor_in_window};
 use crate::{
     controller::ActiveJobState,
@@ -17,8 +18,7 @@ const CLOSE_DELAY: f32 = 3.0;
 struct MenuAction {
     shortcut: &'static str,
     label: &'static str,
-    key: KeyCode,
-    virtual_key: i32,
+    virtual_key: u32,
     run: fn(),
 }
 
@@ -28,13 +28,7 @@ pub(crate) struct MenuActions(Vec<MenuAction>);
 impl Default for MenuActions {
     fn default() -> Self {
         let mut actions = Self(Vec::new());
-        actions.add(
-            "R",
-            "录制 reaction 方案",
-            KeyCode::KeyR,
-            b'R' as i32,
-            record_reaction_plan,
-        );
+        actions.add("R", "录制 reaction 方案", b'R' as u32, record_reaction_plan);
         actions
     }
 }
@@ -44,14 +38,12 @@ impl MenuActions {
         &mut self,
         shortcut: &'static str,
         label: &'static str,
-        key: KeyCode,
-        virtual_key: i32,
+        virtual_key: u32,
         run: fn(),
     ) {
         self.0.push(MenuAction {
             shortcut,
             label,
-            key,
             virtual_key,
             run,
         });
@@ -63,6 +55,10 @@ impl MenuActions {
 
     pub(crate) fn total_height(&self) -> f32 {
         self.list_height() + HINT_HEIGHT
+    }
+
+    pub(crate) fn shortcut_keys(&self) -> Vec<u32> {
+        self.0.iter().map(|action| action.virtual_key).collect()
     }
 }
 
@@ -137,7 +133,6 @@ pub(super) struct ActionMenu {
     pub(super) progress: f32,
     away_time: f32,
     dismissed_until_leave: bool,
-    key_was_down: Vec<bool>,
 }
 
 impl Default for ActionMenu {
@@ -146,7 +141,6 @@ impl Default for ActionMenu {
             progress: 0.0,
             away_time: CLOSE_DELAY,
             dismissed_until_leave: false,
-            key_was_down: Vec::new(),
         }
     }
 }
@@ -177,7 +171,7 @@ pub(super) fn update_menu(
     placement: Res<NoticePlacement>,
     window: Single<&Window, With<PrimaryWindow>>,
     mouse: Res<ButtonInput<MouseButton>>,
-    keyboard: Res<ButtonInput<KeyCode>>,
+    menu_keyboard: Res<MenuKeyboard>,
     mut menu: ResMut<ActionMenu>,
     mut list: Single<&mut Node, With<MenuList>>,
     mut hint: Single<&mut Node, (With<MenuHint>, Without<MenuList>)>,
@@ -235,13 +229,12 @@ pub(super) fn update_menu(
         }
     }
 
-    menu.key_was_down.resize(actions.0.len(), false);
+    let menu_open = active && menu.progress > 0.0;
+    menu_keyboard.set_active(menu_open);
     for (index, action) in actions.0.iter().enumerate() {
-        let key_down = keyboard.pressed(action.key) || native_key_pressed(action.virtual_key);
-        if active && hovering && key_down && !menu.key_was_down[index] {
+        if menu_keyboard.take_triggered(index) && menu_open {
             (action.run)();
         }
-        menu.key_was_down[index] = key_down;
     }
 
     list.top = px((menu.progress - 1.0) * list_height);
@@ -250,15 +243,4 @@ pub(super) fn update_menu(
 
 fn record_reaction_plan() {
     println!("hello world");
-}
-
-#[cfg(target_os = "windows")]
-fn native_key_pressed(virtual_key: i32) -> bool {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
-    unsafe { GetAsyncKeyState(virtual_key) as u16 & 0x8000 != 0 }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn native_key_pressed(_virtual_key: i32) -> bool {
-    false
 }

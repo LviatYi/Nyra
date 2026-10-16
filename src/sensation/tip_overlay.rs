@@ -1,5 +1,6 @@
 mod geometry;
 mod menu;
+mod menu_keyboard;
 mod motion;
 mod progress_border;
 mod style;
@@ -7,6 +8,7 @@ mod text_scroll;
 mod view;
 
 pub(crate) use menu::MenuActions;
+pub(crate) use menu_keyboard::MenuKeyboard;
 
 use crate::controller::{ActiveJobState, JobProcessing};
 use crate::sensation::tip_overlay::menu::{ActionMenu, update_menu};
