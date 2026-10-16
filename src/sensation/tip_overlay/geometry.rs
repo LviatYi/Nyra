@@ -14,9 +14,6 @@ struct BorderPathDefinition {
     canvas: [f32; 2],
     /// Closed polygon in screen coordinates; the first point is not repeated.
     points: Vec<[f32; 2]>,
-    /// Authored outer contour, paired with points; overrides generated border width.
-    #[serde(default)]
-    outer_points: Option<Vec<[f32; 2]>>,
 }
 
 #[derive(Clone, Copy)]
@@ -65,29 +62,34 @@ impl BorderGeometry {
         let definition: BorderPathDefinition =
             serde_json::from_str(source).map_err(|error| error.to_string())?;
         let size = Vec2::from_array(definition.canvas);
-        if size != Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32) {
-            return Err("path canvas must match the current overlay size".into());
+        let overlay_size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32);
+        if !size.is_finite() || size.min_element() <= 0.0 {
+            return Err("path canvas must have a positive, finite size".into());
         }
-        if !width.is_finite() || width <= 0.0 || width >= size.min_element() / 4.0 {
+        if f64::from(size.x) * f64::from(overlay_size.y)
+            != f64::from(size.y) * f64::from(overlay_size.x)
+        {
+            return Err("path canvas must match the current overlay aspect ratio".into());
+        }
+        let scale = overlay_size.x / size.x;
+        if !scale.is_finite() {
+            return Err("path canvas scale must be finite".into());
+        }
+        if !width.is_finite() || width <= 0.0 {
             return Err("border width is outside the supported range".into());
         }
         if definition.points.len() < 3 {
             return Err("path needs at least three vertices".into());
         }
-        if definition
-            .outer_points
-            .as_ref()
-            .is_some_and(|outer| outer.len() != definition.points.len())
-        {
-            return Err("inner and outer contours must have matching vertex counts".into());
-        }
         let points = definition
             .points
             .iter()
-            .map(|[x, y]| Vec2::new(*x - size.x / 2.0, size.y / 2.0 - *y))
+            .map(|[x, y]| Vec2::new(*x - size.x / 2.0, size.y / 2.0 - *y) * scale)
             .collect::<Vec<_>>();
         if points.iter().any(|point| {
-            !point.is_finite() || point.x.abs() > size.x / 2.0 || point.y.abs() > size.y / 2.0
+            !point.is_finite()
+                || point.x.abs() > overlay_size.x / 2.0
+                || point.y.abs() > overlay_size.y / 2.0
         }) {
             return Err("path vertices must lie inside the window".into());
         }
@@ -105,21 +107,6 @@ impl BorderGeometry {
             let previous = points[(index + points.len() - 1) % points.len()];
             let current = points[index];
             let next = points[(index + 1) % points.len()];
-            if let Some(outer_points) = &definition.outer_points {
-                let [x, y] = outer_points[index];
-                let outer = Vec2::new(x - size.x / 2.0, size.y / 2.0 - y);
-                if !outer.is_finite()
-                    || outer.x.abs() > size.x / 2.0
-                    || outer.y.abs() > size.y / 2.0
-                {
-                    return Err("outer contour vertices must lie inside the window".into());
-                }
-                vertices.push(BorderVertexPair {
-                    inner: current,
-                    outer,
-                });
-                continue;
-            }
             let incoming = (current - previous).normalize_or_zero();
             let outgoing = (next - current).normalize_or_zero();
             if incoming == Vec2::ZERO || outgoing == Vec2::ZERO {
@@ -136,7 +123,9 @@ impl BorderGeometry {
                 return Err("path corner is too sharp for an outward join".into());
             }
             let outer = current + (first_normal + second_normal) * (width / denominator);
-            if outer.x.abs() > size.x / 2.0 + 0.01 || outer.y.abs() > size.y / 2.0 + 0.01 {
+            if outer.x.abs() > overlay_size.x / 2.0 + 0.01
+                || outer.y.abs() > overlay_size.y / 2.0 + 0.01
+            {
                 return Err("outward border would leave the window".into());
             }
             vertices.push(BorderVertexPair {
