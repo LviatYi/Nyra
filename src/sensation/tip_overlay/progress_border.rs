@@ -1,16 +1,11 @@
 use super::{
     geometry::BorderGeometry,
-    motion::{DRAIN_DURATION, fill_curve},
+    motion::{DRAIN_DURATION, fill_progress},
     style::{set_material_color, tip_color},
 };
 use crate::controller::ActiveJobState;
 use crate::job::JobConfig;
-use bevy::{
-    animation::graph::AnimationNodeIndex,
-    animation::{AnimatedBy, AnimationTargetId, animated_field},
-    curve::{FunctionCurve, Interval},
-    prelude::*,
-};
+use bevy::prelude::*;
 use std::time::Duration;
 
 #[derive(Component, Clone)]
@@ -80,68 +75,10 @@ pub(super) struct BorderPlayback {
     draining_since: Option<Duration>,
 }
 
-#[derive(Resource)]
-pub(super) struct BorderAnimationNodes {
-    fill: AnimationNodeIndex,
-    drain: AnimationNodeIndex,
-}
-
-pub(super) fn setup_border_animations(
-    mut commands: Commands,
-    mut clips: ResMut<Assets<AnimationClip>>,
-    mut graphs: ResMut<Assets<AnimationGraph>>,
-    fill_entity: Single<Entity, With<BorderFillValue>>,
-    drain_entity: Single<Entity, With<BorderDrainValue>>,
-) {
-    let fill_target = AnimationTargetId::from_name(&Name::new("BorderFill"));
-    let mut fill_clip = AnimationClip::default();
-    fill_clip.add_curve_to_target(
-        fill_target,
-        AnimatableCurve::new(animated_field!(BorderFillValue::progress), fill_curve()),
-    );
-    let (fill_graph, fill_node) = AnimationGraph::from_clip(clips.add(fill_clip));
-    commands.entity(*fill_entity).insert((
-        AnimationPlayer::default(),
-        AnimationGraphHandle(graphs.add(fill_graph)),
-        fill_target,
-        AnimatedBy(*fill_entity),
-    ));
-
-    let drain_target = AnimationTargetId::from_name(&Name::new("BorderDrain"));
-    let mut drain_clip = AnimationClip::default();
-    drain_clip.add_curve_to_target(
-        drain_target,
-        AnimatableCurve::new(
-            animated_field!(BorderDrainValue::progress),
-            FunctionCurve::new(Interval::UNIT, |time| time),
-        ),
-    );
-    let (drain_graph, drain_node) = AnimationGraph::from_clip(clips.add(drain_clip));
-    commands.entity(*drain_entity).insert((
-        AnimationPlayer::default(),
-        AnimationGraphHandle(graphs.add(drain_graph)),
-        drain_target,
-        AnimatedBy(*drain_entity),
-    ));
-    commands.insert_resource(BorderAnimationNodes {
-        fill: fill_node,
-        drain: drain_node,
-    });
-}
-
 pub(super) fn sync_border_playback(
     time: Res<Time<Real>>,
     state: Res<ActiveJobState>,
     jobs: Res<JobConfig>,
-    nodes: Res<BorderAnimationNodes>,
-    mut fill_player: Single<
-        &mut AnimationPlayer,
-        (With<BorderFillValue>, Without<BorderDrainValue>),
-    >,
-    mut drain_player: Single<
-        &mut AnimationPlayer,
-        (With<BorderDrainValue>, Without<BorderFillValue>),
-    >,
     mut fill_value: Single<&mut BorderFillValue>,
     mut drain_value: Single<&mut BorderDrainValue>,
     outgoing_material: Single<&MeshMaterial2d<ColorMaterial>, With<BorderOutgoing>>,
@@ -150,8 +87,6 @@ pub(super) fn sync_border_playback(
 ) {
     let Some(active_job) = state.active_job.as_ref() else {
         if playback.previous_job.take().is_some() {
-            fill_player.stop_all();
-            drain_player.stop_all();
             fill_value.progress = 0.0;
             drain_value.progress = 1.0;
             playback.draining_since = None;
@@ -165,17 +100,11 @@ pub(super) fn sync_border_playback(
         previous.index != active_job.current_index || previous.started_at != active_job.started_at
     });
     if changed {
-        fill_player.stop_all();
         fill_value.progress = if countdown.is_some_and(|(_, total)| total.is_zero()) {
             1.0
         } else {
             0.0
         };
-        if countdown.is_some_and(|(_, total)| !total.is_zero()) {
-            fill_player.start(nodes.fill).pause();
-        }
-
-        drain_player.stop_all();
         drain_value.progress = 1.0;
         playback.draining_since = None;
         if let Some(previous) = playback.previous_job
@@ -184,7 +113,6 @@ pub(super) fn sync_border_playback(
         {
             playback.draining_since = Some(now);
             drain_value.progress = 0.0;
-            drain_player.start(nodes.drain).pause();
             set_material_color(
                 &mut materials,
                 &outgoing_material.0,
@@ -199,12 +127,9 @@ pub(super) fn sync_border_playback(
     });
 
     if let Some((remaining, total)) = countdown {
-        if !total.is_zero()
-            && let Some(animation) = fill_player.animation_mut(nodes.fill)
-        {
-            animation.set_seek_time(
-                (1.0 - remaining.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0),
-            );
+        if !total.is_zero() {
+            let fraction = (1.0 - remaining.as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0);
+            fill_value.progress = fill_progress(fraction);
         }
     }
 
@@ -213,11 +138,10 @@ pub(super) fn sync_border_playback(
             / DRAIN_DURATION.as_secs_f32())
         .clamp(0.0, 1.0);
         if fraction >= 1.0 {
-            drain_player.stop_all();
             drain_value.progress = 1.0;
             playback.draining_since = None;
-        } else if let Some(animation) = drain_player.animation_mut(nodes.drain) {
-            animation.set_seek_time(fraction);
+        } else {
+            drain_value.progress = fraction;
         }
     }
 }
