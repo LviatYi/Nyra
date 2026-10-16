@@ -17,7 +17,6 @@ use crate::job::{Job, JobConfig, Jobs, is_valid_tip_color};
 use crate::perception::PerceptionObserver;
 use crate::reaction::{GlobalHotkeys, ReactionConfig, ReactionPlugin, ReactionRunner, RunState};
 use crate::sensation::SensoryPlugin;
-use crate::settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use bevy::{
     prelude::*,
     render::{
@@ -26,7 +25,7 @@ use bevy::{
     },
     window::{
         CompositeAlphaMode, CursorOptions, WindowLevel, WindowMode, WindowPosition,
-        WindowResizeConstraints, WindowResolution,
+        WindowResolution,
     },
 };
 
@@ -270,7 +269,8 @@ fn run(
     hotkeys: GlobalHotkeys,
     observer: Option<PerceptionObserver>,
 ) {
-    let (canvas_width, canvas_height) = overlay_canvas_size();
+    let menu_actions = sensation::tip_overlay::MenuActions::default();
+    let (screen_width, screen_height) = primary_screen_size();
     let mut app = App::new();
     if let Some(observer) = observer {
         app.insert_resource(observer);
@@ -279,6 +279,7 @@ fn run(
         .insert_resource(JobConfig(config))
         .insert_resource(runner)
         .insert_resource(hotkeys)
+        .insert_resource(menu_actions)
         .add_plugins(
             DefaultPlugins
                 .set(RenderPlugin {
@@ -296,14 +297,9 @@ fn run(
                     }),
                     primary_window: Some(Window {
                         title: String::new(),
-                        resolution: WindowResolution::new(canvas_width, canvas_height),
+                        resolution: WindowResolution::new(screen_width, screen_height),
                         mode: WindowMode::Windowed,
                         position: WindowPosition::At(IVec2::ZERO),
-                        resize_constraints: WindowResizeConstraints {
-                            min_width: WINDOW_WIDTH as f32,
-                            min_height: WINDOW_HEIGHT as f32,
-                            ..default()
-                        },
                         decorations: false,
                         transparent: true,
                         composite_alpha_mode: CompositeAlphaMode::PreMultiplied,
@@ -322,16 +318,10 @@ fn run(
         .run();
 }
 
-#[cfg(target_os = "windows")]
-fn overlay_canvas_size() -> (u32, u32) {
+fn primary_screen_size() -> (u32, u32) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
 
-    let width = unsafe { GetSystemMetrics(SM_CXSCREEN) }.max(WINDOW_WIDTH as i32) as u32;
-    let height = unsafe { GetSystemMetrics(SM_CYSCREEN) }.max(WINDOW_HEIGHT as i32) as u32;
+    let width = unsafe { GetSystemMetrics(SM_CXSCREEN) } as u32;
+    let height = unsafe { GetSystemMetrics(SM_CYSCREEN) } as u32;
     (width, height)
-}
-
-#[cfg(not(target_os = "windows"))]
-fn overlay_canvas_size() -> (u32, u32) {
-    (WINDOW_WIDTH, WINDOW_HEIGHT)
 }

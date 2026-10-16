@@ -1,5 +1,8 @@
 use super::{
     geometry::{BorderGeometry, icon_marker_mesh},
+    menu::{
+        ActionMenu, HINT_HEIGHT, MenuActions, MenuHint, MenuList, menu_areas, menu_item_scenes,
+    },
     progress_border::{
         BorderDrainValue, BorderFillValue, BorderHead, BorderHeadGlow, BorderOutgoing,
         BorderProgress, BorderTrack, CountdownText,
@@ -26,7 +29,7 @@ use bevy::{
 
 #[derive(Resource, Default)]
 pub(super) struct NoticePlacement {
-    center: Option<Vec2>,
+    pub(super) center: Option<Vec2>,
     canvas_size: Option<Vec2>,
     drag_pointer: Option<PointerId>,
 }
@@ -54,6 +57,7 @@ pub(super) fn setup_overlay(
     config: Res<SensationConfigHandle>,
     visual_assets: Res<Assets<SensationConfig>>,
     asset_server: Res<AssetServer>,
+    actions: Res<MenuActions>,
 ) {
     let Some(visuals) = config.resolve(&visual_assets, &asset_server) else {
         return;
@@ -72,6 +76,7 @@ pub(super) fn setup_overlay(
     let border = BorderProgress::new(geometry);
     let head_position = border.head_position(0.0);
     let icon_center_x = -(WINDOW_WIDTH as f32) / 2.0 + 30.0;
+    let list_height = actions.list_height();
 
     commands.insert_resource(NoticePlacement::default());
     commands.spawn_scene_list(bsn_list! {
@@ -207,6 +212,51 @@ pub(super) fn setup_overlay(
                 }
                 CountdownText
                 Pickable::IGNORE
+                --
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(10),
+                    top: px(WINDOW_HEIGHT),
+                    width: px(WINDOW_WIDTH - 20),
+                    height: px(list_height),
+                    overflow: Overflow::clip(),
+                }
+                Pickable::IGNORE
+                Children [
+                    Node {
+                        position_type: PositionType::Absolute,
+                        top: px(-list_height),
+                        width: percent(100),
+                        height: px(list_height),
+                        flex_direction: FlexDirection::Column,
+                    }
+                    MenuList
+                    Pickable::IGNORE
+                    Children [
+                        { menu_item_scenes(&actions) }
+                    ]
+                ]
+                --
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(10),
+                    top: px(WINDOW_HEIGHT),
+                    width: px(WINDOW_WIDTH - 20),
+                    height: px(HINT_HEIGHT),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                }
+                MenuHint
+                Pickable::IGNORE
+                Children [
+                    Text("⌄ 操作")
+                    TextFont {
+                        font: FontSourceTemplate::Generic(GenericFontFamily::SystemUi),
+                        font_size: FontSize::Px(10.0),
+                    }
+                    TextColor(Color::srgb(0.94, 0.96, 1.0))
+                    Pickable::IGNORE
+                ]
             ]
         ]
     });
@@ -354,6 +404,7 @@ fn cancel_notice_drag(
 
 pub(super) fn sync_overlay_position(
     state: Res<ActiveJobState>,
+    actions: Res<MenuActions>,
     mut placement: ResMut<NoticePlacement>,
     mut capture_map: ResMut<PointerCaptureMap>,
     window: Single<&Window, With<PrimaryWindow>>,
@@ -376,7 +427,8 @@ pub(super) fn sync_overlay_position(
 
     center = center.clamp(
         notice_half_size,
-        (canvas_size - notice_half_size).max(notice_half_size),
+        (canvas_size - notice_half_size - Vec2::new(0.0, actions.total_height()))
+            .max(notice_half_size),
     );
     placement.center = Some(center);
 
@@ -394,13 +446,14 @@ pub(super) fn sync_overlay_position(
 pub(super) fn sync_overlay_hit_test(
     state: Res<ActiveJobState>,
     placement: Res<NoticePlacement>,
+    menu: Res<ActionMenu>,
+    actions: Res<MenuActions>,
     window: Single<(Entity, &Window, &mut CursorOptions), With<PrimaryWindow>>,
     mut window_events: MessageWriter<WindowEvent>,
 ) {
     let (entity, window, mut cursor_options) = window.into_inner();
     let cursor = cursor_in_window(window);
     let center = placement.center.unwrap_or(window.resolution.size() * 0.5);
-    let notice_half_size = Vec2::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32) * 0.5;
 
     // Keep picking's mouse position current while the native window passes clicks through.
     if state.active_job.is_some()
@@ -413,18 +466,19 @@ pub(super) fn sync_overlay_hit_test(
             delta: None,
         }));
     }
-    let over_notice = cursor.is_some_and(|cursor| {
-        let offset = (cursor - center).abs();
-        offset.x <= notice_half_size.x && offset.y <= notice_half_size.y
+    let over_overlay = cursor.is_some_and(|cursor| {
+        let (over_notice, over_menu) =
+            menu_areas(cursor, center, menu.progress, actions.list_height());
+        over_notice || over_menu
     });
-    let hit_test = state.active_job.is_some() && (over_notice || placement.drag_pointer.is_some());
+    let hit_test = state.active_job.is_some() && (over_overlay || placement.drag_pointer.is_some());
     if cursor_options.hit_test != hit_test {
         cursor_options.hit_test = hit_test;
     }
 }
 
 #[cfg(target_os = "windows")]
-fn cursor_in_window(window: &Window) -> Option<Vec2> {
+pub(super) fn cursor_in_window(window: &Window) -> Option<Vec2> {
     use windows_sys::Win32::{Foundation::POINT, UI::WindowsAndMessaging::GetCursorPos};
 
     let WindowPosition::At(origin) = window.position else {
@@ -442,6 +496,6 @@ fn cursor_in_window(window: &Window) -> Option<Vec2> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn cursor_in_window(window: &Window) -> Option<Vec2> {
+pub(super) fn cursor_in_window(window: &Window) -> Option<Vec2> {
     window.cursor_position()
 }
