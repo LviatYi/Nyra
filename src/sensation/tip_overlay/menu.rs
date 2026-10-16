@@ -189,6 +189,7 @@ pub(super) fn update_menu(
     });
     let hovering = over_notice || over_menu;
     let active = state.active_job.is_some();
+    let dismiss_with_escape = menu_keyboard.take_dismissed();
 
     if !active {
         menu.progress = 0.0;
@@ -203,7 +204,9 @@ pub(super) fn update_menu(
         } else {
             menu.away_time = (menu.away_time + time.delta_secs()).min(CLOSE_DELAY);
         }
-        if mouse.just_pressed(MouseButton::Middle) && over_menu && menu.progress > 0.0 {
+        if ((mouse.just_pressed(MouseButton::Middle) && over_menu) || dismiss_with_escape)
+            && menu.progress > 0.0
+        {
             menu.dismissed_until_leave = true;
             menu.away_time = CLOSE_DELAY;
         }

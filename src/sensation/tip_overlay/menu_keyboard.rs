@@ -12,7 +12,7 @@ use bevy::prelude::Resource;
 use windows_sys::Win32::{
     System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentThreadId},
     UI::{
-        Input::KeyboardAndMouse::GetAsyncKeyState,
+        Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE},
         WindowsAndMessaging::{
             CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, MSG, PM_NOREMOVE,
             PeekMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
@@ -34,12 +34,15 @@ static HOOK_STATE: OnceLock<Arc<HookState>> = OnceLock::new();
 #[derive(Resource)]
 pub(crate) struct MenuKeyboard {
     state: Arc<HookState>,
+    dismiss_key_index: usize,
     thread_id: u32,
     worker: Option<JoinHandle<()>>,
 }
 
 impl MenuKeyboard {
-    pub(crate) fn new(keys: Vec<u32>) -> Result<Self, String> {
+    pub(crate) fn new(mut keys: Vec<u32>) -> Result<Self, String> {
+        let dismiss_key_index = keys.len();
+        keys.push(VK_ESCAPE as u32);
         let key_count = keys.len();
         let flags = || (0..key_count).map(|_| AtomicBool::new(false)).collect();
         let state = Arc::new(HookState {
@@ -63,6 +66,7 @@ impl MenuKeyboard {
             .map_err(|_| "Menu keyboard thread exited during initialization".to_string())??;
         Ok(Self {
             state,
+            dismiss_key_index,
             thread_id,
             worker: Some(worker),
         })
@@ -86,6 +90,10 @@ impl MenuKeyboard {
 
     pub(super) fn take_triggered(&self, index: usize) -> bool {
         self.state.triggered[index].swap(false, Ordering::SeqCst)
+    }
+
+    pub(super) fn take_dismissed(&self) -> bool {
+        self.take_triggered(self.dismiss_key_index)
     }
 }
 
