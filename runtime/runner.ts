@@ -2,7 +2,7 @@ import {Console} from "node:console";
 import {readSync, writeSync} from "node:fs";
 import {pathToFileURL} from "node:url";
 import distribution from "./bun.json";
-import {createLocalMethods, type NyraContext} from "./sdk";
+import {createContext as createSdkContext, type NyraContext} from "./sdk";
 
 const args = process.argv.slice(2);
 const exit: (code: number) => never = process.exit.bind(process);
@@ -65,7 +65,7 @@ function fatal(error: unknown): never {
         if (session) {
             session.acceptingCalls = false;
             writeMessage({
-                version: 2,
+                version: 3,
                 runId: session.runId,
                 event: "failed",
                 error: errorText(error),
@@ -105,7 +105,7 @@ function callHost(session: RunSession, method: string, args: unknown[]): void {
     }
     const id = session.nextRequestId;
     writeMessage({
-        version: 2,
+        version: 3,
         runId: session.runId,
         event: "call",
         requestId: id,
@@ -115,7 +115,7 @@ function callHost(session: RunSession, method: string, args: unknown[]): void {
     let response: any;
     try {
         response = JSON.parse(readLine());
-        if (!response || response.version !== 2 || response.runId !== session.runId ||
+        if (!response || response.version !== 3 || response.runId !== session.runId ||
             response.event !== "response" || response.requestId !== id ||
             typeof response.ok !== "boolean" ||
             (response.ok ? response.error !== undefined : typeof response.error !== "string") ||
@@ -131,27 +131,12 @@ function callHost(session: RunSession, method: string, args: unknown[]): void {
 }
 
 function createContext(session: RunSession): NyraContext {
-    const localMethods = createLocalMethods(
-        (point, options) => callHost(session, "click", [point, options]),
-        (durationMs) => callHost(session, "delay", [durationMs]),
-    );
-    const boundMethods = new Map<string, (...args: unknown[]) => void>();
-    return new Proxy(Object.freeze({runId: session.runId}), {
-        get(target, property, receiver) {
-            if (Reflect.has(target, property)) return Reflect.get(target, property, receiver);
-            if (Reflect.has(localMethods, property)) {
-                return Reflect.get(localMethods, property, localMethods);
-            }
-            if (typeof property !== "string") return undefined;
-            let binding = boundMethods.get(property);
-            if (!binding) {
-                binding = (...args: unknown[]) => callHost(session, property, args);
-                boundMethods.set(property, binding);
-            }
-            return binding;
-        },
-        set: () => false,
-    }) as NyraContext;
+    return createSdkContext({
+        runId: session.runId,
+        execute: (step) => callHost(session, "execute", [step]),
+        log: (message) => callHost(session, "log", [message]),
+        delay: (durationMs) => callHost(session, "delay", [durationMs]),
+    });
 }
 
 type Macro = (context: NyraContext) => unknown;
@@ -185,7 +170,7 @@ function executeMacro(macro: Macro, runId: string, scriptPath: string): void {
     }
 
     writeMessage({
-        version: 2,
+        version: 3,
         runId,
         event: failure === undefined ? "completed" : "failed",
         ...(failure === undefined ? {} : {error: errorText(failure)}),
@@ -201,13 +186,13 @@ async function runRunner(scriptPaths: string[]): Promise<void> {
         }
         macros = await Promise.all(scriptPaths.map(loadMacro));
     } catch (error) {
-        writeMessage({version: 2, event: "startupFailed", error: errorText(error)});
+        writeMessage({version: 3, event: "startupFailed", error: errorText(error)});
         exit(1);
     }
-    writeMessage({version: 2, event: "ready", scriptCount: macros.length});
+    writeMessage({version: 3, event: "ready", scriptCount: macros.length});
     while (true) {
         const message = JSON.parse(readLine());
-        if (!message || message.version !== 2 || typeof message.event !== "string") {
+        if (!message || message.version !== 3 || typeof message.event !== "string") {
             throw new Error("Invalid host command");
         }
         if (message.event === "shutdown" && Object.keys(message).length === 2) return;

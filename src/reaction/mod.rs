@@ -1,3 +1,4 @@
+mod action;
 mod global_hotkey;
 mod process_job;
 mod runner;
@@ -9,11 +10,13 @@ use crate::{
     controller::{ActiveJobState, JobProcessing},
     job::JobConfig,
 };
+use action::execute_action;
 use bevy::{app::AppExit, prelude::*};
 use global_hotkey::HotkeyEvent;
 use serde::Deserialize;
 use std::{
     io::Write,
+    path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc,
@@ -121,6 +124,7 @@ struct SdkExecution<'a> {
     cancelled: &'a AtomicBool,
     started_at: Instant,
     timeout: Duration,
+    base_dir: &'a Path,
 }
 
 impl SdkExecution<'_> {
@@ -148,6 +152,14 @@ impl SdkExecution<'_> {
             std::thread::sleep(remaining.min(POLL_INTERVAL));
         }
     }
+}
+
+fn default_condition_timeout_ms() -> u64 {
+    3_000
+}
+
+fn default_condition_poll_interval_ms() -> u64 {
+    50
 }
 
 macro_rules! validate_sdk_arguments {
@@ -190,6 +202,22 @@ macro_rules! define_sdk {
                 }
             )*
         }
+        enums {
+            $(
+                $(#[doc = $enum_doc:literal])*
+                $(#[sdk($enum_visibility:ident)])?
+                enum $enum_name:ident {
+                    $(
+                        $variant:ident $(as $variant_name:ident)? {
+                            $(
+                                $(#[serde(default = $variant_default:literal)])?
+                                $variant_field:ident: $variant_type:ty
+                            ),* $(,)?
+                        }
+                    ),* $(,)?
+                }
+            )*
+        }
         context $context:ident {
             properties {
                 $(
@@ -216,6 +244,27 @@ macro_rules! define_sdk {
                 $(
                     $(#[doc = $field_doc])*
                     $field: $field_type,
+                )*
+            }
+        )*
+
+        $(
+            $(#[doc = $enum_doc])*
+            #[derive(Deserialize)]
+            #[serde(
+                tag = "kind",
+                rename_all = "camelCase",
+                rename_all_fields = "camelCase",
+                deny_unknown_fields
+            )]
+            enum $enum_name {
+                $(
+                    $variant {
+                        $(
+                            $(#[serde(default = $variant_default)])?
+                            $variant_field: $variant_type,
+                        )*
+                    },
                 )*
             }
         )*
@@ -331,7 +380,7 @@ fn respond(
     result: Result<(), String>,
 ) -> Result<(), String> {
     let mut response = serde_json::json!({
-        "version": 2,
+        "version": 3,
         "runId": run_id,
         "event": "response",
         "requestId": request_id,

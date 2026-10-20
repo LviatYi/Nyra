@@ -7,21 +7,39 @@ define_sdk! {
             /// Vertical physical pixel coordinate.
             y: i32,
         }
-        /// Reserved description of a UI condition evaluated after an action.
-        struct UiCondition {
-            /// Condition discriminator reserved for the future condition evaluator.
-            kind: String,
-        }
-        /// Complete native options for a click. TypeScript fills every field.
-        struct ClickOptions {
-            /// Optional message written after a successful click.
+        /// A complete synchronous operation, shared by native and debug backends.
+        struct ActionStep {
+            /// A condition that must complete before the action starts.
+            before: Option<UiCondition>,
+            /// The input action to perform.
+            action: InputAction,
+            /// An attached action performed only after successful input.
+            after: Option<AfterAction>,
+            /// Optional description included in the operation log.
             message: Option<String>,
-            /// Optional UI condition. Conditions are reserved but not executed yet.
-            condition: Option<UiCondition>,
-            /// Maximum time reserved for condition evaluation.
-            timeout_ms: u64,
-            /// Interval reserved for condition polling.
-            poll_interval_ms: u64,
+        }
+    }
+    enums {
+        /// A blocking prerequisite for an input action.
+        #[sdk(internal)]
+        enum UiCondition {
+            Delay as DelayCondition { duration_ms: u64 },
+            Image as ImageCondition {
+                path: String,
+                #[serde(default = "default_condition_timeout_ms")]
+                timeout_ms: u64,
+                #[serde(default = "default_condition_poll_interval_ms")]
+                poll_interval_ms: u64,
+            },
+        }
+        /// A side action performed after successful input.
+        enum AfterAction {
+            Delay { duration_ms: u64 },
+        }
+        /// An input action independent of its prerequisites and attached actions.
+        enum InputAction {
+            Click { point: ScreenPoint },
+            Drag { from: ScreenPoint, to: ScreenPoint, duration_ms: u64 },
         }
     }
     context NyraContext {
@@ -35,51 +53,11 @@ define_sdk! {
                 if message.encode_utf16().count() > 2000 {
                     return Err("log(message) length cannot exceed 2000 UTF-16 code units".into());
                 }
-
                 log_in_reaction(run_id, line, &message)
             }
-            /// Performs a left click with complete native options before returning.
-            "click"(_execution, run_id, line; point: ScreenPoint, options: Option<ClickOptions>) {
-                let message = match options {
-                    Some(options) => {
-                        if options.timeout_ms == 0 {
-                            return Err("click(options.timeoutMs) must be greater than 0".into());
-                        }
-                        if options.poll_interval_ms == 0 {
-                            return Err(
-                                "click(options.pollIntervalMs) must be greater than 0".into(),
-                            );
-                        }
-                        if options.poll_interval_ms > options.timeout_ms {
-                            return Err(
-                                "click(options.pollIntervalMs) cannot exceed timeoutMs".into(),
-                            );
-                        }
-                        if let Some(condition) = options.condition {
-                            return Err(format!(
-                                "click condition '{}' is reserved but not implemented",
-                                condition.kind,
-                            ));
-                        }
-                        if options
-                            .message
-                            .as_ref()
-                            .is_some_and(|message| message.encode_utf16().count() > 2000)
-                        {
-                            return Err(
-                                "click(options.message) length cannot exceed 2000 UTF-16 code units"
-                                    .into(),
-                            );
-                        }
-                        options.message
-                    }
-                    None => None,
-                };
-                click_screen(&point)?;
-
-                let message = message
-                    .unwrap_or_else(|| format!("CLICK AT ({}, {})", point.x, point.y));
-                log_in_reaction(run_id, line, &message)
+            /// Completes a prerequisite, an input action and its attached action before returning.
+            "execute"(execution, run_id, line; step: ActionStep) {
+                execute_action(execution, run_id, line, step)
             }
             /// Blocks the script for a fixed duration, subject to cancellation and the run timeout.
             "delay"(execution, run_id, line; duration_ms: u64) {

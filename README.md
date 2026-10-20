@@ -103,20 +103,45 @@ export default function macro(ctx: NyraContext) {
 正常使用时，在 tip 中配置 `reaction.hotkey` 和 `reaction.script`。快捷键支持 `Ctrl`、`Alt`、`Shift`、`Win` 修饰键与字母、数字、
 `F1..F24`、`Space`、`Enter`、`Escape`、`Tab`；功能键可单独使用，其他按键至少需要一个修饰键。脚本相对路径及 Bun
 工作目录均按配置文件所在目录解析。Bun 在 Nyra 启动时自动转换并预加载 TS，运行时不检查类型；修改脚本后重启 Nyra 生效。
-`ctx` 提供只读 `runId`、同步的 `log(message)`、`click(point, options?)`、`delay(durationMs)`，以及
+`ctx` 提供只读 `runId`、同步的 `log(message)`、`click(point, options?)`、`drag(from, to, options?)`、`delay(durationMs)`，以及
 `click_in_grid`、`click_in_line`、`click_in_array` 点击辅助方法。每次调用立即向 Rust 发出请求，阻塞当前脚本线程直至操作完成；
-点击默认包含 50 ms 的后续等待，可通过 `delayMs` 调整。宿主操作错误直接在调用处抛出，可使用普通 `try/catch` 处理。
+每次点击或拖拽都按「事前条件 → 行为操作 → 事后动作」执行，三个阶段完成后调用才返回。
+默认没有事前条件，事后等待 50 ms；宿主操作错误直接在调用处抛出，可使用普通 `try/catch` 处理。
 日志附带运行标识和脚本行号，单条消息长度最多为 2000 个 UTF-16 码元。普通 `console` 输出作为诊断转发到 Rust stderr，Bun stdout
 保留给生命周期与 SDK 请求协议。
+
+通过 `set_defaults` 设置本轮后续操作的默认阶段，单次参数覆盖整个对应阶段，且不会修改默认值；省略字段继承默认值，`null` 显式关闭该阶段：
+
+```typescript
+ctx.set_defaults({
+    before: {kind: "delay", durationMs: 100},
+    after: {kind: "delay", durationMs: 50},
+});
+ctx.click({x: 640, y: 360});
+ctx.click({x: 840, y: 360}, {
+    before: {kind: "image", path: "conditions/menu.json", timeoutMs: 3000},
+    after: null,
+});
+ctx.drag({x: 640, y: 360}, {x: 840, y: 360}, {before: null, durationMs: 300});
+```
+
+事前条件支持固定等待和已有 Perception JSON 图片条件；图片条件默认超时 3000 ms、轮询间隔 50 ms，路径相对主配置目录，
+匹配阈值及模板路径取自条件文件。未匹配或目标失焦时继续等待；捕获失败、资源错误或超时会阻止本次输入。
+事后动作当前支持固定等待，仅在输入成功后执行。`set_defaults` 同样作用于点击辅助方法和拖拽，每次宏调用重新创建默认值。
+旧 `delayMs` 请迁移为 `after: {kind: "delay", durationMs: ...}`；旧占位 `condition` 参数改由 `before` 表达。
+
+公共 SDK 的 `createContext(backend)` 接受实现 `ReactionBackend` 的后端；原生后端将完整 `ActionStep` 交给 Rust。
+调试页面可复用同一脚本，并用 `createDebugContext({mark})` 接收从 1 开始编号的 `{sequence, step}`，由页面在点击位置绘制序号或绘制拖拽路径。
+调试后端保留完整的事前、行为、事后配置供展示，不实际等待、截图或发送系统输入；页面负责将物理屏幕坐标换算为自身的显示坐标。
 
 宏在单个 Bun 线程内同步执行，不需要 `async/await`；`async` 入口及返回 Promise 的入口会被拒绝。
 运行期间不调度该线程的定时器或异步回调，等待操作请使用 `ctx.delay`；入口返回即结束本轮。
 已有普通同步脚本可直接使用，旧异步脚本需要移除 `async` 与 SDK 调用前的 `await`，并将异步等待改为同步 SDK 调用。
 
-SDK 绑定由公共 RPC 层处理。`runner.ts` 通过动态上下文将任意方法调用统一编码为 `{ method, args }`。Rust 的
+SDK 绑定由公共 RPC 层处理。`runner.ts` 将后端调用统一编码为 `{ method, args }`。Rust 的
 `src/reaction/sdk.rs` 是 SDK 结构体、方法签名、文档和宿主行为的唯一声明源；`define_sdk!` 生成方法匹配和位置参数反序列化，
 `build.rs` 在任意 Cargo 构建时生成 `runtime/context.d.ts`。新增方法或结构体后运行 `cargo check` 即可刷新声明文件，不要手工编辑
-`.d.ts`；也无需单独编写 TS 包装函数、请求/响应关联或 Rust 参数解析代码。
+`.d.ts`；新增原生方法时同时更新运行器的类型化后端绑定。用户侧的参数默认值和坐标辅助方法位于 `runtime/sdk.ts`。
 
 根配置可增加 `"reaction": { "timeoutMs": 30000 }`，省略时使用 30 秒；允许范围为 1..=300000 毫秒。旧提示配置保持有效，没有脚本时不会启动
 Bun。 Windows 会话中同时只允许一项 Nyra 宏，忙时拒绝新触发。单轮入口结束后 Bun

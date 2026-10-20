@@ -398,6 +398,7 @@ fn run_worker(
                 cancelled,
                 started_at: run.started_at,
                 timeout,
+                base_dir: cwd,
             };
             if let Err(error) = execution.check() {
                 break Err(error);
@@ -428,7 +429,7 @@ fn run_worker(
                     }
                 };
                 let command = serde_json::json!({
-                    "version": 2,
+                    "version": 3,
                     "event": "run",
                     "runId": &run_id,
                     "scriptId": script_id,
@@ -463,7 +464,7 @@ fn run_worker(
                     .map_err(|error| format!("Script stdout protocol error: {error}"))?;
                 match message {
                     RunnerMessage::Ready {
-                        version: 2,
+                        version: 3,
                         script_count,
                     } if !ready && script_count == scripts.len() => {
                         ready = true;
@@ -471,11 +472,11 @@ fn run_worker(
                             .send(Ok(()))
                             .map_err(|_| "Nyra startup process was interrupted".to_string())?;
                     }
-                    RunnerMessage::StartupFailed { version: 2, error } if !ready => {
+                    RunnerMessage::StartupFailed { version: 3, error } if !ready => {
                         break Err(format!("Resident Bun failed to load script: {error}"));
                     }
                     RunnerMessage::Call {
-                        version: 2,
+                        version: 3,
                         run_id,
                         request_id,
                         instruction,
@@ -494,6 +495,7 @@ fn run_worker(
                             cancelled,
                             started_at: run.started_at,
                             timeout,
+                            base_dir: cwd,
                         };
                         let result = execute_instruction(&execution, &run_id, instruction);
                         if let Err(error) = execution.check() {
@@ -501,7 +503,7 @@ fn run_worker(
                         }
                         respond(&input_tx, &run_id, request_id, result)?;
                     }
-                    RunnerMessage::Completed { version: 2, run_id } => {
+                    RunnerMessage::Completed { version: 3, run_id } => {
                         let run = active
                             .take()
                             .ok_or("Idle resident Bun reported script completion")?;
@@ -512,7 +514,7 @@ fn run_worker(
                         output_bytes = 0;
                     }
                     RunnerMessage::Failed {
-                        version: 2,
+                        version: 3,
                         run_id,
                         error,
                     } => {

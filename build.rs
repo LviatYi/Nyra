@@ -21,6 +21,22 @@ macro_rules! define_sdk {
                 }
             )*
         }
+        enums {
+            $(
+                $(#[doc = $enum_doc:literal])*
+                $(#[sdk($enum_visibility:ident)])?
+                enum $enum_name:ident {
+                    $(
+                        $variant:ident $(as $variant_name:ident)? {
+                            $(
+                                $(#[serde(default = $variant_default:literal)])?
+                                $variant_field:ident: $variant_type:ty
+                            ),* $(,)?
+                        }
+                    ),* $(,)?
+                }
+            )*
+        }
         context $context:ident {
             properties {
                 $(
@@ -58,6 +74,63 @@ macro_rules! define_sdk {
                     output.push_str(";\n");
                 )*
                 output.push_str("}\n\n");
+            )*
+            $(
+                $(
+                    let variant_name: Option<&str> = None$(.or(Some(stringify!($variant_name))))?;
+                    if let Some(name) = variant_name {
+                        output.push_str("export interface ");
+                        output.push_str(name);
+                        output.push_str(" {\n    readonly kind: \"");
+                        output.push_str(&lower_camel(stringify!($variant)));
+                        output.push_str("\";\n");
+                        $(
+                            output.push_str("    readonly ");
+                            output.push_str(&lower_camel(stringify!($variant_field)));
+                            $(
+                                let _ = $variant_default;
+                                output.push('?');
+                            )?
+                            output.push_str(": ");
+                            output.push_str(&typescript_type(stringify!($variant_type)));
+                            output.push_str(";\n");
+                        )*
+                        output.push_str("}\n\n");
+                    }
+                )*
+                push_docs(&mut output, "", &[$($enum_doc),*]);
+                let internal = false$( || stringify!($enum_visibility) == "internal")?;
+                if !internal {
+                    output.push_str("export ");
+                }
+                output.push_str("type ");
+                output.push_str(stringify!($enum_name));
+                output.push_str(" =\n");
+                $(
+                    output.push_str("    | ");
+                    let variant_name: Option<&str> = None$(.or(Some(stringify!($variant_name))))?;
+                    if let Some(name) = variant_name {
+                        output.push_str(name);
+                        output.push('\n');
+                    } else {
+                        output.push_str("{ readonly kind: \"");
+                        output.push_str(&lower_camel(stringify!($variant)));
+                        output.push_str("\";");
+                        $(
+                            output.push_str(" readonly ");
+                            output.push_str(&lower_camel(stringify!($variant_field)));
+                            $(
+                                let _ = $variant_default;
+                                output.push('?');
+                            )?
+                            output.push_str(": ");
+                            output.push_str(&typescript_type(stringify!($variant_type)));
+                            output.push(';');
+                        )*
+                        output.push_str(" }\n");
+                    }
+                )*
+                output.push_str(";\n\n");
             )*
             output.push_str("/** Context supplied to the default macro entry point. */\n");
             output.push_str("export interface ");
@@ -162,6 +235,8 @@ fn lower_camel(name: &str) -> String {
         } else if uppercase {
             output.extend(character.to_uppercase());
             uppercase = false;
+        } else if output.is_empty() {
+            output.extend(character.to_lowercase());
         } else {
             output.push(character);
         }

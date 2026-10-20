@@ -72,6 +72,63 @@ pub enum RecordTarget<'a> {
     Screen,
 }
 
+/// A prepared condition reusable by synchronous Reaction steps.
+pub(crate) struct ImageCondition {
+    #[cfg(target_os = "windows")]
+    config: ConditionConfig,
+    #[cfg(target_os = "windows")]
+    template: Vec<u8>,
+}
+
+impl ImageCondition {
+    #[cfg(target_os = "windows")]
+    pub(crate) fn load(path: &Path) -> Result<Self, String> {
+        let config = load_condition(path)?;
+        validate_screen_target(&config.target)?;
+        let template_path = path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(&config.template);
+        let template = xcap::image::open(&template_path)
+            .map_err(|error| {
+                format!(
+                    "Unable to load template {}: {error}",
+                    template_path.display()
+                )
+            })?
+            .into_rgba8();
+        let region = config.target.region();
+        if template.width() != region.width || template.height() != region.height {
+            return Err(format!(
+                "Template size does not match the region in {}",
+                path.display()
+            ));
+        }
+        Ok(Self {
+            config,
+            template: template.into_raw(),
+        })
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub(crate) fn load(_path: &Path) -> Result<Self, String> {
+        Err("Perception matching currently requires Windows".into())
+    }
+
+    /// None means the target is unavailable, never a successful match.
+    #[cfg(target_os = "windows")]
+    pub(crate) fn matches(&self) -> Result<Option<bool>, String> {
+        capture_target(&self.config.target).map(|frame| {
+            frame.map(|frame| similarity(&self.template, frame.as_raw()) >= self.config.threshold)
+        })
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub(crate) fn matches(&self) -> Result<Option<bool>, String> {
+        Err("Perception matching currently requires Windows".into())
+    }
+}
+
 #[cfg(target_os = "windows")]
 struct WindowBounds {
     title: String,
@@ -84,8 +141,7 @@ struct WindowBounds {
 #[cfg(target_os = "windows")]
 struct PreparedJobCondition {
     job_index: usize,
-    config: ConditionConfig,
-    template: Vec<u8>,
+    condition: ImageCondition,
 }
 
 #[cfg(target_os = "windows")]
@@ -116,31 +172,10 @@ impl PerceptionObserver {
                 continue;
             };
             let path = base.join(condition);
-            let config = load_condition(&path)?;
-            validate_screen_target(&config.target)?;
-            let template_path = path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join(&config.template);
-            let template = xcap::image::open(&template_path)
-                .map_err(|error| {
-                    format!(
-                        "Unable to load template {}: {error}",
-                        template_path.display()
-                    )
-                })?
-                .into_rgba8();
-            let region = config.target.region();
-            if template.width() != region.width || template.height() != region.height {
-                return Err(format!(
-                    "Template size does not match the region in {}",
-                    path.display()
-                ));
-            }
+            let condition = ImageCondition::load(&path)?;
             conditions.push(PreparedJobCondition {
                 job_index,
-                config,
-                template: template.into_raw(),
+                condition,
             });
         }
         if conditions.is_empty() {
@@ -207,7 +242,7 @@ fn watch_tip_conditions(
         let now = Instant::now();
         for item in &mut watched {
             if item.matched
-                && let CaptureTarget::Window { title, .. } = &item.prepared.config.target
+                && let CaptureTarget::Window { title, .. } = &item.prepared.condition.config.target
                 && !window_is_focused(title)
             {
                 item.matched = false;
@@ -215,12 +250,12 @@ fn watch_tip_conditions(
             if now < item.next_poll {
                 continue;
             }
-            item.next_poll = now + Duration::from_millis(item.prepared.config.poll_interval_ms);
-            match capture_target(&item.prepared.config.target) {
-                Ok(Some(frame)) => {
+            item.next_poll =
+                now + Duration::from_millis(item.prepared.condition.config.poll_interval_ms);
+            match item.prepared.condition.matches() {
+                Ok(Some(matched)) => {
                     item.capture_failed = false;
-                    item.matched = similarity(&item.prepared.template, frame.as_raw())
-                        >= item.prepared.config.threshold;
+                    item.matched = matched;
                 }
                 Ok(None) => {
                     item.capture_failed = false;
