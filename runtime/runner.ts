@@ -1,33 +1,20 @@
 import {Console} from "node:console";
+import {readSync, writeSync} from "node:fs";
 import {pathToFileURL} from "node:url";
 import distribution from "./bun.json";
 import {createLocalMethods, type NyraContext} from "./sdk";
 
 const args = process.argv.slice(2);
-const writeProtocol = process.stdout.write.bind(process.stdout);
-const exit = process.exit.bind(process);
+const exit: (code: number) => never = process.exit.bind(process);
+const readBuffer = Buffer.allocUnsafe(4096);
+let input = Buffer.alloc(0);
 let fatalExiting = false;
-let commandHandler: ((message: unknown) => void) | undefined;
-
-interface PendingCall {
-    id: number;
-    resolve: () => void;
-    reject: (error: Error) => void;
-}
-
-interface Instruction {
-    line: number;
-    method: string;
-    args: unknown[];
-}
 
 interface RunSession {
     runId: string;
     scriptPath: string;
     acceptingCalls: boolean;
     nextRequestId: number;
-    instructions: Instruction[];
-    pending?: PendingCall;
 }
 
 let activeRun: RunSession | undefined;
@@ -44,104 +31,56 @@ function errorText(error: unknown): string {
     return String(error instanceof Error ? error.stack ?? error.message : error).slice(0, 2000);
 }
 
-function writeMessage(message: object): Promise<void> {
-    const line = JSON.stringify(message) + "\n";
-    return new Promise<void>((resolve, reject) => {
-        writeProtocol(line, (error) => error ? reject(error) : resolve());
-    });
+function writeMessage(message: object): void {
+    const bytes = Buffer.from(JSON.stringify(message) + "\n");
+    let offset = 0;
+    while (offset < bytes.length) {
+        const written = writeSync(1, bytes, offset, bytes.length - offset);
+        if (written === 0) throw new Error("Host output channel has been closed");
+        offset += written;
+    }
 }
 
-function stopPending(session: RunSession): void {
-    if (!session.pending) return;
-    const pending = session.pending;
-    session.pending = undefined;
-    pending.reject(new Error("Macro stopped before its instruction batch completed"));
+function readLine(): string {
+    while (true) {
+        const newline = input.indexOf(10);
+        if (newline !== -1) {
+            if (newline > 16 * 1024) throw new Error("Host message exceeds 16 KiB");
+            const line = input.subarray(0, newline).toString("utf8");
+            input = input.subarray(newline + 1);
+            return line.replace(/\r$/, "");
+        }
+        if (input.length > 16 * 1024) throw new Error("Host message exceeds 16 KiB");
+        const bytesRead = readSync(0, readBuffer, 0, readBuffer.length, null);
+        if (bytesRead === 0) throw new Error("Host input channel has been closed");
+        input = Buffer.concat([input, readBuffer.subarray(0, bytesRead)]);
+    }
 }
 
-function fatal(error: unknown): void {
-    if (fatalExiting) return;
+function fatal(error: unknown): never {
+    if (fatalExiting) exit(1);
     fatalExiting = true;
-    const session = activeRun;
-    if (session) {
-        session.acceptingCalls = false;
-        stopPending(session);
-        void writeMessage({
-            version: 1,
-            runId: session.runId,
-            event: "failed",
-            error: errorText(error),
-        }).finally(() => exit(1));
-    } else {
-        console.error(errorText(error));
+    try {
+        const session = activeRun;
+        if (session) {
+            session.acceptingCalls = false;
+            writeMessage({
+                version: 2,
+                runId: session.runId,
+                event: "failed",
+                error: errorText(error),
+            });
+        } else {
+            console.error(errorText(error));
+        }
+    } finally {
         exit(1);
     }
 }
 
 process.on("uncaughtException", fatal);
 process.on("unhandledRejection", (error) => fatal(error ?? "Unhandled rejection"));
-process.stdout.on("error", () => exit(1));
 process.stderr.on("error", () => exit(1));
-process.stdin.on("error", () => exit(1));
-process.stdin.on("end", () => exit(1));
-
-const started = new Promise<void>((resolve, reject) => {
-    let input = "";
-    let handshakeComplete = false;
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk: string) => {
-        if (fatalExiting) return;
-        try {
-            input += chunk;
-            let newline: number;
-            while ((newline = input.indexOf("\n")) !== -1) {
-                const line = input.slice(0, newline);
-                input = input.slice(newline + 1);
-                if (Buffer.byteLength(line, "utf8") > 16 * 1024) {
-                    throw new Error("Host message exceeds 16 KiB");
-                }
-                if (!handshakeComplete) {
-                    if (line !== "start") throw new Error("Invalid host handshake");
-                    handshakeComplete = true;
-                    resolve();
-                    continue;
-                }
-
-                const message = JSON.parse(line);
-                if (message?.event === "response") {
-                    handleResponse(message);
-                } else if (commandHandler) {
-                    commandHandler(message);
-                } else {
-                    throw new Error("Host command arrived before the runner was ready");
-                }
-            }
-            if (Buffer.byteLength(input, "utf8") > 16 * 1024) {
-                throw new Error("Host message exceeds 16 KiB");
-            }
-        } catch (error) {
-            reject(error);
-            fatal(error);
-        }
-    });
-    process.stdin.resume();
-});
-
-function handleResponse(response: any): void {
-    const session = activeRun;
-    if (!session || !response || response.version !== 1 || response.runId !== session.runId ||
-        response.event !== "response" || !session.pending ||
-        response.requestId !== session.pending.id || typeof response.ok !== "boolean" ||
-        (response.ok ? response.error !== undefined : typeof response.error !== "string") ||
-        Object.keys(response).some((key) => ![
-            "version", "runId", "event", "requestId", "ok", "error",
-        ].includes(key))) {
-        throw new Error("Invalid SDK response from host");
-    }
-    const call = session.pending;
-    session.pending = undefined;
-    if (response.ok) call.resolve();
-    else call.reject(new Error(response.error));
-}
 
 function captureSourceLine(scriptPath: string): number {
     const stack = new Error().stack;
@@ -160,35 +99,41 @@ function captureSourceLine(scriptPath: string): number {
     throw new Error(`Unable to locate an SDK instruction call in ${scriptPath}`);
 }
 
-function enqueueInstruction(session: RunSession, method: string, args: unknown[]): void {
+function callHost(session: RunSession, method: string, args: unknown[]): void {
     if (activeRun !== session || !session.acceptingCalls || fatalExiting) {
-        throw new Error("SDK instructions are not allowed after the macro entry returns");
+        throw new Error("SDK calls are not allowed after the macro entry returns");
     }
-    session.instructions.push({
-        line: captureSourceLine(session.scriptPath),
-        method,
-        args: structuredClone(args),
+    const id = session.nextRequestId;
+    writeMessage({
+        version: 2,
+        runId: session.runId,
+        event: "call",
+        requestId: id,
+        instruction: {line: captureSourceLine(session.scriptPath), method, args},
     });
-}
-
-function submitBatch(session: RunSession): Promise<void> {
-    const id = session.nextRequestId++;
-    return new Promise<void>((resolve, reject) => {
-        session.pending = {id, resolve, reject};
-        void writeMessage({
-            version: 1,
-            runId: session.runId,
-            event: "batch",
-            requestId: id,
-            instructions: session.instructions,
-        }).catch(fatal);
-    });
+    session.nextRequestId += 1;
+    let response: any;
+    try {
+        response = JSON.parse(readLine());
+        if (!response || response.version !== 2 || response.runId !== session.runId ||
+            response.event !== "response" || response.requestId !== id ||
+            typeof response.ok !== "boolean" ||
+            (response.ok ? response.error !== undefined : typeof response.error !== "string") ||
+            Object.keys(response).some((key) => ![
+                "version", "runId", "event", "requestId", "ok", "error",
+            ].includes(key))) {
+            throw new Error("Invalid SDK response from host");
+        }
+    } catch (error) {
+        fatal(error);
+    }
+    if (!response.ok) throw new Error(response.error);
 }
 
 function createContext(session: RunSession): NyraContext {
     const localMethods = createLocalMethods(
-        (point, options) => enqueueInstruction(session, "click", [point, options]),
-        (durationMs) => enqueueInstruction(session, "delay", [durationMs]),
+        (point, options) => callHost(session, "click", [point, options]),
+        (durationMs) => callHost(session, "delay", [durationMs]),
     );
     const boundMethods = new Map<string, (...args: unknown[]) => void>();
     return new Proxy(Object.freeze({runId: session.runId}), {
@@ -200,7 +145,7 @@ function createContext(session: RunSession): NyraContext {
             if (typeof property !== "string") return undefined;
             let binding = boundMethods.get(property);
             if (!binding) {
-                binding = (...args: unknown[]) => enqueueInstruction(session, property, args);
+                binding = (...args: unknown[]) => callHost(session, property, args);
                 boundMethods.set(property, binding);
             }
             return binding;
@@ -209,44 +154,38 @@ function createContext(session: RunSession): NyraContext {
     }) as NyraContext;
 }
 
-type Macro = (context: NyraContext) => void | Promise<void>;
+type Macro = (context: NyraContext) => unknown;
 
 async function loadMacro(scriptPath: string): Promise<Macro> {
     const module = await import(pathToFileURL(scriptPath).href);
-    if (typeof module.default !== "function") {
-        throw new Error(`${scriptPath}: default export must be a function`);
+    if (typeof module.default !== "function" || module.default.constructor.name === "AsyncFunction") {
+        throw new Error(`${scriptPath}: default export must be a synchronous function`);
     }
     return module.default;
 }
 
-async function executeMacro(
-    macro: Macro,
-    runId: string,
-    scriptPath: string,
-): Promise<void> {
+function executeMacro(macro: Macro, runId: string, scriptPath: string): void {
     const session: RunSession = {
         runId,
         scriptPath,
         acceptingCalls: true,
         nextRequestId: 1,
-        instructions: [],
     };
     activeRun = session;
     let failure: unknown;
     try {
         const result = macro(createContext(session));
-        await result;
-        session.acceptingCalls = false;
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        await submitBatch(session);
+        if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+            throw new Error("Macro entry must not return a Promise; use synchronous SDK calls");
+        }
     } catch (error) {
         failure = error ?? "Macro failed";
+    } finally {
         session.acceptingCalls = false;
-        stopPending(session);
     }
 
-    await writeMessage({
-        version: 1,
+    writeMessage({
+        version: 2,
         runId,
         event: failure === undefined ? "completed" : "failed",
         ...(failure === undefined ? {} : {error: errorText(failure)}),
@@ -255,45 +194,36 @@ async function executeMacro(
 }
 
 async function runRunner(scriptPaths: string[]): Promise<void> {
+    let macros: Macro[];
     try {
         if (Bun.version !== distribution.version) {
             throw new Error(`Expected bundled Bun ${distribution.version}, got ${Bun.version}`);
         }
-        const macros = await Promise.all(scriptPaths.map(loadMacro));
-        commandHandler = (message: any) => {
-            if (!message || message.version !== 1 || typeof message.event !== "string") {
-                throw new Error("Invalid host command");
-            }
-            if (message.event === "shutdown" && Object.keys(message).length === 2) {
-                exit(0);
-            }
-            if (message.event !== "run" || Object.keys(message).some((key) => ![
-                    "version", "event", "runId", "scriptId",
-                ].includes(key)) || typeof message.runId !== "string" ||
-                !Number.isSafeInteger(message.scriptId) || !macros[message.scriptId]) {
-                throw new Error("Invalid run command");
-            }
-            if (activeRun) throw new Error("A macro is already running");
-            void executeMacro(
-                macros[message.scriptId],
-                message.runId,
-                scriptPaths[message.scriptId],
-            ).catch(fatal);
-        };
-        await writeMessage({
-            version: 1,
-            event: "ready",
-            scriptCount: macros.length,
-        });
+        macros = await Promise.all(scriptPaths.map(loadMacro));
     } catch (error) {
-        await writeMessage({
-            version: 1,
-            event: "startupFailed",
-            error: errorText(error),
-        });
+        writeMessage({version: 2, event: "startupFailed", error: errorText(error)});
         exit(1);
+    }
+    writeMessage({version: 2, event: "ready", scriptCount: macros.length});
+    while (true) {
+        const message = JSON.parse(readLine());
+        if (!message || message.version !== 2 || typeof message.event !== "string") {
+            throw new Error("Invalid host command");
+        }
+        if (message.event === "shutdown" && Object.keys(message).length === 2) return;
+        if (message.event !== "run" || Object.keys(message).some((key) => ![
+                "version", "event", "runId", "scriptId",
+            ].includes(key)) || typeof message.runId !== "string" ||
+            !Number.isSafeInteger(message.scriptId) || !macros[message.scriptId]) {
+            throw new Error("Invalid run command");
+        }
+        executeMacro(macros[message.scriptId], message.runId, scriptPaths[message.scriptId]);
     }
 }
 
-await started;
-await runRunner(args);
+try {
+    if (readLine() !== "start") throw new Error("Invalid host handshake");
+    await runRunner(args);
+} catch (error) {
+    fatal(error);
+}

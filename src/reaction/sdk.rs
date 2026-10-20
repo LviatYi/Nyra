@@ -30,16 +30,16 @@ define_sdk! {
             readonly run_id: String;
         }
         methods {
-            /// Queues a message for the Rust host to write during instruction execution.
-            "log"(run_id, line; message: String) {
+            /// Writes a message through the Rust host before returning.
+            "log"(_execution, run_id, line; message: String) {
                 if message.encode_utf16().count() > 2000 {
                     return Err("log(message) length cannot exceed 2000 UTF-16 code units".into());
                 }
 
                 log_in_reaction(run_id, line, &message)
             }
-            /// Queues a left click with complete native options.
-            "click"(run_id, line; point: ScreenPoint, options: Option<ClickOptions>) {
+            /// Performs a left click with complete native options before returning.
+            "click"(_execution, run_id, line; point: ScreenPoint, options: Option<ClickOptions>) {
                 let message = match options {
                     Some(options) => {
                         if options.timeout_ms == 0 {
@@ -81,9 +81,9 @@ define_sdk! {
                     .unwrap_or_else(|| format!("CLICK AT ({}, {})", point.x, point.y));
                 log_in_reaction(run_id, line, &message)
             }
-            /// Waits for a fixed number of milliseconds.
-            "delay"(run_id, line; duration_ms: u64) {
-                std::thread::sleep(std::time::Duration::from_millis(duration_ms));
+            /// Blocks the script for a fixed duration, subject to cancellation and the run timeout.
+            "delay"(execution, run_id, line; duration_ms: u64) {
+                execution.delay(std::time::Duration::from_millis(duration_ms))?;
                 log_in_reaction(run_id, line, &format!("DELAYED {duration_ms} MS"))
             }
         }

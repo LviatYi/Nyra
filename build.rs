@@ -32,7 +32,7 @@ macro_rules! define_sdk {
                 $(
                     $(#[doc = $method_doc:literal])*
                     $method:literal(
-                        $run_id:ident, $line:ident;
+                        $execution:ident, $run_id:ident, $line:ident;
                         $($argument:ident: $argument_type:ty),* $(,)?
                     ) $body:block
                 )*
@@ -86,6 +86,7 @@ macro_rules! define_sdk {
                 )*
                 let _ = separator;
                 output.push_str("): void;\n");
+                let _ = stringify!($execution);
                 let _ = stringify!($run_id);
                 let _ = stringify!($line);
                 let _ = stringify!($body);

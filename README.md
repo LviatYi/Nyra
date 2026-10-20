@@ -88,23 +88,30 @@ cargo build --release --locked
 ./nyra.exe ./config.json --run-script ./scripts/macro.ts
 ```
 
-`.ts` / `.mts` 脚本默认导出返回 Promise 的函数，例如保存为 `scripts/macro.ts`：
+`.ts` / `.mts` 脚本默认导出普通同步函数，例如保存为 `scripts/macro.ts`：
 
 ```typescript
-import type {NyraContext} from "../runtime/context";
+import type {NyraContext} from "../runtime/sdk";
 
-export default async function macro(ctx: NyraContext) {
-    await ctx.log(`开始运行 ${ctx.runId}`);
+export default function macro(ctx: NyraContext) {
+    ctx.log(`开始运行 ${ctx.runId}`);
+    ctx.delay(1000);
+    ctx.log("等待完成");
 }
 ```
 
 正常使用时，在 tip 中配置 `reaction.hotkey` 和 `reaction.script`。快捷键支持 `Ctrl`、`Alt`、`Shift`、`Win` 修饰键与字母、数字、
 `F1..F24`、`Space`、`Enter`、`Escape`、`Tab`；功能键可单独使用，其他按键至少需要一个修饰键。脚本相对路径及 Bun
 工作目录均按配置文件所在目录解析。Bun 在 Nyra 启动时自动转换并预加载 TS，运行时不检查类型；修改脚本后重启 Nyra 生效。
-`ctx` 提供只读 `runId`、`log(message): Promise<void>` 和 `click(point): Promise<void>`。`await ctx.log(...)` 通过协议请求 Rust 写入自身
-stdout，收到宿主确认后继续执行；`await ctx.click({ x, y })` 移动系统光标并执行一次左键点击。日志附带运行标识，单条消息长度最多为 2000 个 UTF-16 码元。 SDK 调用需逐个 `await`
-，并行调用会失败，入口返回时仍有未完成 SDK 调用也会失败。普通 `console` 输出继续作为诊断转发到 Rust stderr，Bun stdout
+`ctx` 提供只读 `runId`、同步的 `log(message)`、`click(point, options?)`、`delay(durationMs)`，以及
+`click_in_grid`、`click_in_line`、`click_in_array` 点击辅助方法。每次调用立即向 Rust 发出请求，阻塞当前脚本线程直至操作完成；
+点击默认包含 50 ms 的后续等待，可通过 `delayMs` 调整。宿主操作错误直接在调用处抛出，可使用普通 `try/catch` 处理。
+日志附带运行标识和脚本行号，单条消息长度最多为 2000 个 UTF-16 码元。普通 `console` 输出作为诊断转发到 Rust stderr，Bun stdout
 保留给生命周期与 SDK 请求协议。
+
+宏在单个 Bun 线程内同步执行，不需要 `async/await`；`async` 入口及返回 Promise 的入口会被拒绝。
+运行期间不调度该线程的定时器或异步回调，等待操作请使用 `ctx.delay`；入口返回即结束本轮。
+已有普通同步脚本可直接使用，旧异步脚本需要移除 `async` 与 SDK 调用前的 `await`，并将异步等待改为同步 SDK 调用。
 
 SDK 绑定由公共 RPC 层处理。`runner.ts` 通过动态上下文将任意方法调用统一编码为 `{ method, args }`。Rust 的
 `src/reaction/sdk.rs` 是 SDK 结构体、方法签名、文档和宿主行为的唯一声明源；`define_sdk!` 生成方法匹配和位置参数反序列化，
@@ -113,7 +120,8 @@ SDK 绑定由公共 RPC 层处理。`runner.ts` 通过动态上下文将任意�
 
 根配置可增加 `"reaction": { "timeoutMs": 30000 }`，省略时使用 30 秒；允许范围为 1..=300000 毫秒。旧提示配置保持有效，没有脚本时不会启动
 Bun。 Windows 会话中同时只允许一项 Nyra 宏，忙时拒绝新触发。单轮入口结束后 Bun
-回到空闲并等待下一次触发；未等待的后台工作不保证完成。脚本异常只结束本轮，超时、取消、协议故障及宿主退出会回收托管进程。
+回到空闲并等待下一次触发。脚本异常只结束本轮，超时、取消、协议故障及宿主退出会回收托管进程。
+Rust 独立管理取消及整轮超时；`delay` 按最多 10 ms 的等待分段检查，不会等完整延迟结束才处理取消（不保证硬实时响应）。
 脚本输出单行最多 16 KiB、每次最多 1 MiB，超限会失败。脚本拥有 Bun 的本机能力，此运行器用于可信用户脚本。
 
 仅开发运行器时可用 `cargo build --locked`，再执行

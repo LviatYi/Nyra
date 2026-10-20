@@ -12,7 +12,14 @@ use crate::{
 use bevy::{app::AppExit, prelude::*};
 use global_hotkey::HotkeyEvent;
 use serde::Deserialize;
-use std::{io::Write, sync::mpsc, time::Duration};
+use std::{
+    io::Write,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    time::{Duration, Instant},
+};
 
 const MAX_LINE_BYTES: usize = 16 * 1024;
 const MAX_OUTPUT_BYTES: usize = 1024 * 1024;
@@ -110,6 +117,39 @@ struct SdkInstruction {
     args: serde_json::Value,
 }
 
+struct SdkExecution<'a> {
+    cancelled: &'a AtomicBool,
+    started_at: Instant,
+    timeout: Duration,
+}
+
+impl SdkExecution<'_> {
+    fn check(&self) -> Result<(), String> {
+        if self.cancelled.load(Ordering::Acquire) {
+            return Err("Script has been cancelled; resident Bun has been reclaimed".into());
+        }
+        if self.started_at.elapsed() >= self.timeout {
+            return Err(format!(
+                "Script execution timed out ({} ms)",
+                self.timeout.as_millis()
+            ));
+        }
+        Ok(())
+    }
+
+    fn delay(&self, duration: Duration) -> Result<(), String> {
+        let started_at = Instant::now();
+        loop {
+            self.check()?;
+            let remaining = duration.saturating_sub(started_at.elapsed());
+            if remaining.is_zero() {
+                return Ok(());
+            }
+            std::thread::sleep(remaining.min(POLL_INTERVAL));
+        }
+    }
+}
+
 macro_rules! validate_sdk_arguments {
     ($method:expr, $args:expr;) => {
         serde_json::from_value::<[serde_json::Value; 0]>($args.clone())
@@ -161,7 +201,7 @@ macro_rules! define_sdk {
                 $(
                     $(#[doc = $method_doc:literal])*
                     $method:literal(
-                        $run_id:ident, $line:ident;
+                        $execution:ident, $run_id:ident, $line:ident;
                         $($argument:ident: $argument_type:ty),* $(,)?
                     ) $body:block
                 )*
@@ -191,14 +231,17 @@ macro_rules! define_sdk {
         }
 
         fn dispatch_sdk_instruction(
+            execution: &SdkExecution<'_>,
             run_id: &str,
             instruction: SdkInstruction,
         ) -> Result<(), String> {
+            execution.check()?;
             match instruction.method.as_str() {
                 $(
                     $method => {
                         decode_sdk_arguments!(instruction.method, instruction.args;
                             $($argument: $argument_type),*);
+                        let $execution = execution;
                         let $run_id = run_id;
                         let $line = instruction.line;
                         (|| -> Result<(), String> { $body })()
@@ -288,7 +331,7 @@ fn respond(
     result: Result<(), String>,
 ) -> Result<(), String> {
     let mut response = serde_json::json!({
-        "version": 1,
+        "version": 2,
         "runId": run_id,
         "event": "response",
         "requestId": request_id,

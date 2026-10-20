@@ -31,10 +31,10 @@ export interface ClickOptions {
 export interface NyraContext {
     /** Identifier of the current macro execution. */
     readonly runId: string;
-    /** Queues a message for the Rust host to write during instruction execution. */
+    /** Writes a message through the Rust host before returning. */
     log(message: string): void;
-    /** Queues a left click with complete native options. */
+    /** Performs a left click with complete native options before returning. */
     click(point: ScreenPoint, options: ClickOptions | null): void;
-    /** Waits for a fixed number of milliseconds. */
+    /** Blocks the script for a fixed duration, subject to cancellation and the run timeout. */
     delay(durationMs: number): void;
 }

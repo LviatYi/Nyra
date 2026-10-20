@@ -3,7 +3,11 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Arc, Mutex, mpsc},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -12,8 +16,8 @@ use bevy::prelude::Resource;
 use serde::Deserialize;
 
 use super::{
-    MAX_LINE_BYTES, MAX_OUTPUT_BYTES, POLL_INTERVAL, RunState, RunStatus, SdkInstruction,
-    dispatch_sdk_instruction,
+    MAX_LINE_BYTES, MAX_OUTPUT_BYTES, POLL_INTERVAL, RunState, RunStatus, SdkExecution,
+    SdkInstruction, dispatch_sdk_instruction,
     process_job::{ProcessJob, ScriptSlot},
     respond, validate_sdk_instruction,
 };
@@ -22,7 +26,6 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 enum WorkerCommand {
     Run { run_id: String, script_id: u32 },
-    Cancel,
     Shutdown,
 }
 
@@ -58,11 +61,11 @@ enum RunnerMessage {
         run_id: String,
         error: String,
     },
-    Batch {
+    Call {
         version: u32,
         run_id: String,
         request_id: u64,
-        instructions: Vec<SdkInstruction>,
+        instruction: SdkInstruction,
     },
 }
 
@@ -94,6 +97,7 @@ pub struct ReactionRunner {
     script_ids: HashMap<PathBuf, u32>,
     sequence: u64,
     status: Arc<Mutex<RunStatus>>,
+    cancelled: Arc<AtomicBool>,
     events: Option<mpsc::SyncSender<WorkerEvent>>,
     worker: Option<JoinHandle<()>>,
 }
@@ -152,6 +156,8 @@ impl ReactionRunner {
         let (event_tx, event_rx) = mpsc::sync_channel(64);
         let (startup_tx, startup_rx) = mpsc::sync_channel(1);
         let worker_status = status.clone();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = cancelled.clone();
         let worker_events = event_tx.clone();
         let cwd = script_base.clone();
         let worker_runtime_dir = runtime_dir.clone();
@@ -167,6 +173,7 @@ impl ReactionRunner {
                     event_rx,
                     worker_events,
                     &worker_status,
+                    &worker_cancelled,
                     &startup_tx,
                 );
                 if let Err(error) = result {
@@ -184,6 +191,7 @@ impl ReactionRunner {
                 script_ids,
                 sequence: 0,
                 status,
+                cancelled,
                 events: Some(event_tx),
                 worker: Some(worker),
             }),
@@ -218,6 +226,7 @@ impl ReactionRunner {
             .as_ref()
             .ok_or("The current configuration has no runnable Reaction scripts")?;
         self.sequence += 1;
+        self.cancelled.store(false, Ordering::Release);
         let run_id = format!("{}-{}", std::process::id(), self.sequence);
         *self.status.lock().unwrap() = RunStatus {
             run_id: Some(run_id.clone()),
@@ -246,9 +255,7 @@ impl ReactionRunner {
     }
 
     pub fn cancel(&self) {
-        if let Some(events) = &self.events {
-            let _ = events.try_send(WorkerEvent::Command(WorkerCommand::Cancel));
-        }
+        self.cancelled.store(true, Ordering::Release);
     }
 
     pub fn poll(&mut self) {
@@ -270,6 +277,7 @@ impl ReactionRunner {
 
 impl Drop for ReactionRunner {
     fn drop(&mut self) {
+        self.cancel();
         if let Some(events) = self.events.take() {
             let _ = events.try_send(WorkerEvent::Command(WorkerCommand::Shutdown));
         }
@@ -312,6 +320,7 @@ fn run_worker(
     event_rx: mpsc::Receiver<WorkerEvent>,
     event_tx: mpsc::SyncSender<WorkerEvent>,
     status: &Mutex<RunStatus>,
+    cancelled: &AtomicBool,
     startup: &mpsc::SyncSender<Result<(), String>>,
 ) -> Result<(), String> {
     let mut bun_config = std::ffi::OsString::from("--config=");
@@ -384,14 +393,15 @@ fn run_worker(
     let mut output_bytes = 0usize;
     let mut open_output_streams = 2usize;
     let loop_result = loop {
-        if active
-            .as_ref()
-            .is_some_and(|run| run.started_at.elapsed() >= timeout)
-        {
-            break Err(format!(
-                "Script execution timed out ({} ms)",
-                timeout.as_millis()
-            ));
+        if let Some(run) = &active {
+            let execution = SdkExecution {
+                cancelled,
+                started_at: run.started_at,
+                timeout,
+            };
+            if let Err(error) = execution.check() {
+                break Err(error);
+            }
         }
         if let Some(exit) = process
             .child
@@ -403,12 +413,6 @@ fn run_worker(
 
         match event_rx.recv_timeout(POLL_INTERVAL) {
             Ok(WorkerEvent::Command(WorkerCommand::Shutdown)) => break Ok(()),
-            Ok(WorkerEvent::Command(WorkerCommand::Cancel)) => {
-                if active.is_some() {
-                    status.lock().unwrap().state = RunState::CleaningUp;
-                    break Err("Script has been cancelled; resident Bun has been reclaimed".into());
-                }
-            }
             Ok(WorkerEvent::Command(WorkerCommand::Run { run_id, script_id })) => {
                 if !ready || active.is_some() {
                     status.lock().unwrap().state = RunState::Failed(
@@ -424,7 +428,7 @@ fn run_worker(
                     }
                 };
                 let command = serde_json::json!({
-                    "version": 1,
+                    "version": 2,
                     "event": "run",
                     "runId": &run_id,
                     "scriptId": script_id,
@@ -459,7 +463,7 @@ fn run_worker(
                     .map_err(|error| format!("Script stdout protocol error: {error}"))?;
                 match message {
                     RunnerMessage::Ready {
-                        version: 1,
+                        version: 2,
                         script_count,
                     } if !ready && script_count == scripts.len() => {
                         ready = true;
@@ -467,29 +471,37 @@ fn run_worker(
                             .send(Ok(()))
                             .map_err(|_| "Nyra startup process was interrupted".to_string())?;
                     }
-                    RunnerMessage::StartupFailed { version: 1, error } if !ready => {
+                    RunnerMessage::StartupFailed { version: 2, error } if !ready => {
                         break Err(format!("Resident Bun failed to load script: {error}"));
                     }
-                    RunnerMessage::Batch {
-                        version: 1,
+                    RunnerMessage::Call {
+                        version: 2,
                         run_id,
                         request_id,
-                        instructions,
+                        instruction,
                     } => {
                         let run = active
                             .as_mut()
-                            .ok_or("Idle resident Bun sent an SDK instruction batch")?;
+                            .ok_or("Idle resident Bun sent an SDK call")?;
                         if run.run_id != run_id
                             || request_id != run.next_request_id
                             || request_id > 9_007_199_254_740_991
                         {
-                            break Err("SDK batch run ID or request ID does not match".into());
+                            break Err("SDK call run ID or request ID does not match".into());
                         }
                         run.next_request_id += 1;
-                        let result = execute_instruction_batch(&run_id, instructions);
+                        let execution = SdkExecution {
+                            cancelled,
+                            started_at: run.started_at,
+                            timeout,
+                        };
+                        let result = execute_instruction(&execution, &run_id, instruction);
+                        if let Err(error) = execution.check() {
+                            break Err(error);
+                        }
                         respond(&input_tx, &run_id, request_id, result)?;
                     }
-                    RunnerMessage::Completed { version: 1, run_id } => {
+                    RunnerMessage::Completed { version: 2, run_id } => {
                         let run = active
                             .take()
                             .ok_or("Idle resident Bun reported script completion")?;
@@ -500,7 +512,7 @@ fn run_worker(
                         output_bytes = 0;
                     }
                     RunnerMessage::Failed {
-                        version: 1,
+                        version: 2,
                         run_id,
                         error,
                     } => {
@@ -566,33 +578,19 @@ fn send_json(
         .map_err(|error| format!("Failed to send resident Bun command: {error}"))
 }
 
-fn execute_instruction_batch(
+fn execute_instruction(
+    execution: &SdkExecution<'_>,
     run_id: &str,
-    instructions: Vec<SdkInstruction>,
+    instruction: SdkInstruction,
 ) -> Result<(), String> {
-    for (index, instruction) in instructions.iter().enumerate() {
-        if instruction.line == 0 {
-            return Err(format!(
-                "Instruction {} has an invalid source line",
-                index + 1
-            ));
-        }
-        validate_sdk_instruction(instruction).map_err(|error| {
-            format!(
-                "Instruction {} at line {} is invalid: {error}",
-                index + 1,
-                instruction.line,
-            )
-        })?;
+    if instruction.line == 0 {
+        return Err("SDK call has an invalid source line".into());
     }
-
-    for (index, instruction) in instructions.into_iter().enumerate() {
-        let line = instruction.line;
-        dispatch_sdk_instruction(run_id, instruction).map_err(|error| {
-            format!("Instruction {} at line {} failed: {error}", index + 1, line,)
-        })?;
-    }
-    Ok(())
+    validate_sdk_instruction(&instruction)
+        .map_err(|error| format!("SDK call at line {} is invalid: {error}", instruction.line))?;
+    let line = instruction.line;
+    dispatch_sdk_instruction(execution, run_id, instruction)
+        .map_err(|error| format!("SDK call at line {line} failed: {error}"))
 }
 
 fn read_output(pipe: impl Read, diagnostic: bool, events: mpsc::SyncSender<WorkerEvent>) {

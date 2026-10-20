@@ -9,7 +9,7 @@ export type {ScreenPoint, UiCondition} from "./context";
 
 /** User-facing click options. Omitted values are filled before serialization. */
 export interface ClickOptions {
-    /** Fixed delay emitted as a separate instruction after the click. Defaults to 100 ms. */
+    /** Fixed blocking delay after the click. Defaults to 50 ms. */
     readonly delayMs?: number;
     /** Reserved UI condition evaluated by Rust after the click. */
     readonly condition?: UiCondition | null;
@@ -124,7 +124,7 @@ function arrayIndex(index: number, length: number): number {
 }
 
 export function createLocalMethods(clickNative: NativeClick, delayNative: NativeDelay) {
-    function enqueueClick(
+    function performClick(
         point: ScreenPoint,
         message: string | null,
         options?: ClickOptions,
@@ -138,7 +138,7 @@ export function createLocalMethods(clickNative: NativeClick, delayNative: Native
 
     return Object.freeze({
         click(point: ScreenPoint, options?: ClickOptions): void {
-            enqueueClick(point, null, options);
+            performClick(point, null, options);
         },
 
         click_in_grid(grid: UiGrid, row: number, col: number, options?: ClickOptions): void {
@@ -158,7 +158,7 @@ export function createLocalMethods(clickNative: NativeClick, delayNative: Native
                     "grid y",
                 ),
             };
-            enqueueClick(
+            performClick(
                 point,
                 `CLICK IN GRID AT (${row}, ${col}) RESOLVED TO (${point.x}, ${point.y})`,
                 options,
@@ -188,7 +188,7 @@ export function createLocalMethods(clickNative: NativeClick, delayNative: Native
                     x: start.x,
                     y: axisCoordinate(start.y, end.y, itemCount, index, "line y"),
                 };
-            enqueueClick(
+            performClick(
                 point,
                 `CLICK IN LINE AT ${index} RESOLVED TO (${point.x}, ${point.y})`,
                 options,
@@ -206,7 +206,7 @@ export function createLocalMethods(clickNative: NativeClick, delayNative: Native
             const resolvedIndex = arrayIndex(index, points.length);
             const source = points[resolvedIndex];
             const point = {x: source.x, y: source.y};
-            enqueueClick(
+            performClick(
                 point,
                 `CLICK IN ARRAY AT ${index} RESOLVED TO (${point.x}, ${point.y})`,
                 options,
