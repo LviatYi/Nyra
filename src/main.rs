@@ -270,7 +270,7 @@ fn run(
     observer: Option<PerceptionObserver>,
 ) -> Result<(), String> {
     let menu_actions = sensation::tip_overlay::MenuActions::default();
-    let menu_keyboard = sensation::tip_overlay::MenuKeyboard::new(menu_actions.shortcut_keys())?;
+    let menu_keys = menu_actions.shortcut_keys();
     let (screen_width, screen_height) = primary_screen_size();
     let mut app = App::new();
     if let Some(observer) = observer {
@@ -281,7 +281,6 @@ fn run(
         .insert_resource(runner)
         .insert_resource(hotkeys)
         .insert_resource(menu_actions)
-        .insert_resource(menu_keyboard)
         .add_plugins(
             DefaultPlugins
                 .set(RenderPlugin {
@@ -316,8 +315,10 @@ fn run(
         )
         .add_plugins(ControllerPlugin)
         .add_plugins(SensoryPlugin)
-        .add_plugins(ReactionPlugin)
-        .run();
+        .add_plugins(ReactionPlugin);
+    // Winit's event loop must register Raw Input before the menu removes its keyboard entry.
+    let menu_keyboard = sensation::tip_overlay::MenuKeyboard::new(menu_keys)?;
+    app.insert_resource(menu_keyboard).run();
     Ok(())
 }
 

@@ -12,7 +12,10 @@ use bevy::prelude::Resource;
 use windows_sys::Win32::{
     System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentThreadId},
     UI::{
-        Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE},
+        Input::{
+            KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE},
+            RAWINPUTDEVICE, RIDEV_REMOVE, RegisterRawInputDevices,
+        },
         WindowsAndMessaging::{
             CallNextHookEx, GetMessageW, HC_ACTION, KBDLLHOOKSTRUCT, MSG, PM_NOREMOVE,
             PeekMessageW, PostThreadMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
@@ -41,6 +44,22 @@ pub(crate) struct MenuKeyboard {
 
 impl MenuKeyboard {
     pub(crate) fn new(mut keys: Vec<u32>) -> Result<Self, String> {
+        // Initialize after winit, which registers both raw keyboard and mouse input.
+        // Keep keyboard input on the low-level hook and legacy window messages.
+        let keyboard = RAWINPUTDEVICE {
+            usUsagePage: 0x01, // Generic Desktop Controls.
+            usUsage: 0x06,     // Keyboard; leave raw mouse input registered.
+            dwFlags: RIDEV_REMOVE,
+            hwndTarget: null_mut(),
+        };
+        if unsafe { RegisterRawInputDevices(&keyboard, 1, size_of::<RAWINPUTDEVICE>() as u32) } == 0
+        {
+            return Err(format!(
+                "Unable to unregister raw keyboard input: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+
         let dismiss_key_index = keys.len();
         keys.push(VK_ESCAPE as u32);
         let key_count = keys.len();
