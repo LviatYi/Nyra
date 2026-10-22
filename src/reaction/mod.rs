@@ -2,9 +2,11 @@ mod action;
 mod global_hotkey;
 mod process_job;
 mod runner;
+mod sdk_types;
 
 pub(crate) use global_hotkey::GlobalHotkeys;
 pub use runner::ReactionRunner;
+use sdk_types::{ActionStep, AfterAction, InputAction, ScreenPoint, UiCondition};
 
 use crate::{
     controller::{ActiveJobState, JobProcessing},
@@ -154,14 +156,6 @@ impl SdkExecution<'_> {
     }
 }
 
-fn default_condition_timeout_ms() -> u64 {
-    3_000
-}
-
-fn default_condition_poll_interval_ms() -> u64 {
-    50
-}
-
 macro_rules! validate_sdk_arguments {
     ($method:expr, $args:expr;) => {
         serde_json::from_value::<[serde_json::Value; 0]>($args.clone())
@@ -191,33 +185,6 @@ macro_rules! decode_sdk_arguments {
 
 macro_rules! define_sdk {
     (
-        types {
-            $(
-                $(#[doc = $type_doc:literal])*
-                struct $type_name:ident {
-                    $(
-                        $(#[doc = $field_doc:literal])*
-                        $field:ident: $field_type:ty
-                    ),* $(,)?
-                }
-            )*
-        }
-        enums {
-            $(
-                $(#[doc = $enum_doc:literal])*
-                $(#[sdk($enum_visibility:ident)])?
-                enum $enum_name:ident {
-                    $(
-                        $variant:ident $(as $variant_name:ident)? {
-                            $(
-                                $(#[serde(default = $variant_default:literal)])?
-                                $variant_field:ident: $variant_type:ty
-                            ),* $(,)?
-                        }
-                    ),* $(,)?
-                }
-            )*
-        }
         context $context:ident {
             properties {
                 $(
@@ -236,39 +203,6 @@ macro_rules! define_sdk {
             }
         }
     ) => {
-        $(
-            $(#[doc = $type_doc])*
-            #[derive(Deserialize)]
-            #[serde(rename_all = "camelCase", deny_unknown_fields)]
-            struct $type_name {
-                $(
-                    $(#[doc = $field_doc])*
-                    $field: $field_type,
-                )*
-            }
-        )*
-
-        $(
-            $(#[doc = $enum_doc])*
-            #[derive(Deserialize)]
-            #[serde(
-                tag = "kind",
-                rename_all = "camelCase",
-                rename_all_fields = "camelCase",
-                deny_unknown_fields
-            )]
-            enum $enum_name {
-                $(
-                    $variant {
-                        $(
-                            $(#[serde(default = $variant_default)])?
-                            $variant_field: $variant_type,
-                        )*
-                    },
-                )*
-            }
-        )*
-
         fn validate_sdk_instruction(instruction: &SdkInstruction) -> Result<(), String> {
             match instruction.method.as_str() {
                 $(

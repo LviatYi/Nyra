@@ -139,8 +139,12 @@ ctx.drag({x: 640, y: 360}, {x: 840, y: 360}, {before: null, durationMs: 300});
 已有普通同步脚本可直接使用，旧异步脚本需要移除 `async` 与 SDK 调用前的 `await`，并将异步等待改为同步 SDK 调用。
 
 SDK 绑定由公共 RPC 层处理。`runner.ts` 将后端调用统一编码为 `{ method, args }`。Rust 的
-`src/reaction/sdk.rs` 是 SDK 结构体、方法签名、文档和宿主行为的唯一声明源；`define_sdk!` 生成方法匹配和位置参数反序列化，
-`build.rs` 在任意 Cargo 构建时生成 `runtime/context.d.ts`。新增方法或结构体后运行 `cargo check` 即可刷新声明文件，不要手工编辑
+`src/reaction/sdk_types.rs` 定义普通 Rust 共用模型，通过 `ts-rs` 导出数据类型；具名图片条件和延迟条件直接定义为结构体。
+`src/reaction/sdk.rs` 保留方法签名、文档和宿主行为；`define_sdk!` 继续生成方法声明、方法匹配和位置参数反序列化。
+`build.rs` 在任意 Cargo 构建时生成 `runtime/context.d.ts`，直接采用 `ts-rs` 的数据类型声明，并将长整数映射为 `number`。
+模型中的 `serde(default)` 负责 Rust 默认值，`ts(as = "Option<u64>", optional)` 显式声明对应 TS 参数可省略。
+`build.rs` 从接口属性和方法参数递归发现类型依赖，并统一公开导出具名类型，无需维护额外的类型列表。
+未被接口及其依赖引用的 Rust 类型不进入声明文件。运行 `cargo check` 即可刷新声明文件，不要手工编辑
 `.d.ts`；新增原生方法时同时更新运行器的类型化后端绑定。用户侧的参数默认值和坐标辅助方法位于 `runtime/sdk.ts`。
 
 根配置可增加 `"reaction": { "timeoutMs": 30000 }`，省略时使用 30 秒；允许范围为 1..=300000 毫秒。旧提示配置保持有效，没有脚本时不会启动

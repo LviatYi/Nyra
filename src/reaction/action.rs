@@ -25,22 +25,22 @@ pub(super) fn execute_action(
     }
     execution.check()?;
     let description = match step.action {
-        InputAction::Click { point } => {
+        InputAction::Click(input) => {
+            let point = input.point;
             click_screen(&point)?;
             format!("CLICK AT ({}, {})", point.x, point.y)
         }
-        InputAction::Drag {
-            from,
-            to,
-            duration_ms,
-        } => {
+        InputAction::Drag(input) => {
+            let from = input.from;
+            let to = input.to;
+            let duration_ms = input.duration_ms;
             drag_screen(execution, &from, &to, Duration::from_millis(duration_ms))?;
             format!("DRAG FROM ({}, {}) TO ({}, {})", from.x, from.y, to.x, to.y)
         }
     };
-    if let Some(AfterAction::Delay { duration_ms }) = step.after {
+    if let Some(AfterAction::Delay(condition)) = step.after {
         execution
-            .delay(Duration::from_millis(duration_ms))
+            .delay(Duration::from_millis(condition.duration_ms))
             .map_err(|error| format!("After action: {error}"))?;
     }
     log_in_reaction(
@@ -52,12 +52,13 @@ pub(super) fn execute_action(
 
 fn wait_condition(execution: &SdkExecution<'_>, condition: UiCondition) -> Result<(), String> {
     match condition {
-        UiCondition::Delay { duration_ms } => execution.delay(Duration::from_millis(duration_ms)),
-        UiCondition::Image {
-            path,
-            timeout_ms,
-            poll_interval_ms,
-        } => {
+        UiCondition::Delay(condition) => {
+            execution.delay(Duration::from_millis(condition.duration_ms))
+        }
+        UiCondition::Image(condition) => {
+            let path = condition.path;
+            let timeout_ms = condition.timeout_ms;
+            let poll_interval_ms = condition.poll_interval_ms;
             if path.trim().is_empty() {
                 return Err("Image condition path cannot be empty".into());
             }

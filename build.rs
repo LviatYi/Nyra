@@ -1,4 +1,16 @@
-use std::{env, fs, path::PathBuf};
+use std::{
+    any::TypeId,
+    collections::{BTreeMap, HashSet},
+    env, fs,
+    path::PathBuf,
+};
+
+use sdk_types::*;
+use ts_rs::{Config, TS, TypeVisitor};
+
+#[allow(dead_code)]
+#[path = "src/reaction/sdk_types.rs"]
+mod sdk_types;
 
 const RUNTIME_FILES: [&str; 5] = [
     "runner.ts",
@@ -8,35 +20,9 @@ const RUNTIME_FILES: [&str; 5] = [
     "bunfig.toml",
 ];
 
+// Only the method interface is project-specific. Data shapes come from ts-rs.
 macro_rules! define_sdk {
     (
-        types {
-            $(
-                $(#[doc = $type_doc:literal])*
-                struct $type_name:ident {
-                    $(
-                        $(#[doc = $field_doc:literal])*
-                        $field:ident: $field_type:ty
-                    ),* $(,)?
-                }
-            )*
-        }
-        enums {
-            $(
-                $(#[doc = $enum_doc:literal])*
-                $(#[sdk($enum_visibility:ident)])?
-                enum $enum_name:ident {
-                    $(
-                        $variant:ident $(as $variant_name:ident)? {
-                            $(
-                                $(#[serde(default = $variant_default:literal)])?
-                                $variant_field:ident: $variant_type:ty
-                            ),* $(,)?
-                        }
-                    ),* $(,)?
-                }
-            )*
-        }
         context $context:ident {
             properties {
                 $(
@@ -56,82 +42,22 @@ macro_rules! define_sdk {
         }
     ) => {
         fn generate_context_declaration() -> String {
+            let config = Config::new().with_large_int("number");
             let mut output = String::from(
-                "// AUTO-GENERATED from src/reaction/sdk.rs by build.rs.\n\
+                "// AUTO-GENERATED from src/reaction/sdk_types.rs and sdk.rs by build.rs.\n\
                  // Run `cargo check` (or any Cargo build) to regenerate. Do not edit directly.\n\n",
             );
-            $(
-                push_docs(&mut output, "", &[$($type_doc),*]);
-                output.push_str("export interface ");
-                output.push_str(stringify!($type_name));
-                output.push_str(" {\n");
-                $(
-                    push_docs(&mut output, "    ", &[$($field_doc),*]);
-                    output.push_str("    readonly ");
-                    output.push_str(&lower_camel(stringify!($field)));
-                    output.push_str(": ");
-                    output.push_str(&typescript_type(stringify!($field_type)));
-                    output.push_str(";\n");
-                )*
-                output.push_str("}\n\n");
-            )*
-            $(
-                $(
-                    let variant_name: Option<&str> = None$(.or(Some(stringify!($variant_name))))?;
-                    if let Some(name) = variant_name {
-                        output.push_str("export interface ");
-                        output.push_str(name);
-                        output.push_str(" {\n    readonly kind: \"");
-                        output.push_str(&lower_camel(stringify!($variant)));
-                        output.push_str("\";\n");
-                        $(
-                            output.push_str("    readonly ");
-                            output.push_str(&lower_camel(stringify!($variant_field)));
-                            $(
-                                let _ = $variant_default;
-                                output.push('?');
-                            )?
-                            output.push_str(": ");
-                            output.push_str(&typescript_type(stringify!($variant_type)));
-                            output.push_str(";\n");
-                        )*
-                        output.push_str("}\n\n");
-                    }
-                )*
-                push_docs(&mut output, "", &[$($enum_doc),*]);
-                let internal = false$( || stringify!($enum_visibility) == "internal")?;
-                if !internal {
-                    output.push_str("export ");
-                }
-                output.push_str("type ");
-                output.push_str(stringify!($enum_name));
-                output.push_str(" =\n");
-                $(
-                    output.push_str("    | ");
-                    let variant_name: Option<&str> = None$(.or(Some(stringify!($variant_name))))?;
-                    if let Some(name) = variant_name {
-                        output.push_str(name);
-                        output.push('\n');
-                    } else {
-                        output.push_str("{ readonly kind: \"");
-                        output.push_str(&lower_camel(stringify!($variant)));
-                        output.push_str("\";");
-                        $(
-                            output.push_str(" readonly ");
-                            output.push_str(&lower_camel(stringify!($variant_field)));
-                            $(
-                                let _ = $variant_default;
-                                output.push('?');
-                            )?
-                            output.push_str(": ");
-                            output.push_str(&typescript_type(stringify!($variant_type)));
-                            output.push(';');
-                        )*
-                        output.push_str(" }\n");
-                    }
-                )*
-                output.push_str(";\n\n");
-            )*
+            let mut types = TypeDeclarations {
+                config: &config,
+                visited: HashSet::new(),
+                declarations: BTreeMap::new(),
+            };
+            $(types.visit::<$property_type>();)*
+            $($(types.visit::<$argument_type>();)*)*
+            for declaration in types.declarations.into_values() {
+                output.push_str(&declaration);
+            }
+
             output.push_str("/** Context supplied to the default macro entry point. */\n");
             output.push_str("export interface ");
             output.push_str(stringify!($context));
@@ -141,7 +67,7 @@ macro_rules! define_sdk {
                 output.push_str("    readonly ");
                 output.push_str(&lower_camel(stringify!($property)));
                 output.push_str(": ");
-                output.push_str(&typescript_type(stringify!($property_type)));
+                output.push_str(&<$property_type as TS>::name(&config));
                 output.push_str(";\n");
             )*
             $(
@@ -155,7 +81,7 @@ macro_rules! define_sdk {
                     separator = ", ";
                     output.push_str(&lower_camel(stringify!($argument)));
                     output.push_str(": ");
-                    output.push_str(&typescript_type(stringify!($argument_type)));
+                    output.push_str(&<$argument_type as TS>::name(&config));
                 )*
                 let _ = separator;
                 output.push_str("): void;\n");
@@ -175,6 +101,7 @@ include!("src/reaction/sdk.rs");
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/reaction/sdk.rs");
+    println!("cargo:rerun-if-changed=src/reaction/sdk_types.rs");
     for file in RUNTIME_FILES {
         if file != "context.d.ts" {
             println!("cargo:rerun-if-changed=runtime/{file}");
@@ -200,6 +127,41 @@ fn main() {
             &runtime_dir.join(file),
         );
     }
+}
+
+struct TypeDeclarations<'a> {
+    config: &'a Config,
+    visited: HashSet<TypeId>,
+    declarations: BTreeMap<String, String>,
+}
+
+impl TypeVisitor for TypeDeclarations<'_> {
+    fn visit<T: TS + 'static + ?Sized>(&mut self) {
+        if !self.visited.insert(TypeId::of::<T>()) {
+            return;
+        }
+        if T::output_path().is_some() {
+            let mut declaration = String::new();
+            push_type::<T>(&mut declaration, self.config);
+            let name = T::name(self.config);
+            assert!(
+                self.declarations
+                    .insert(name.clone(), declaration)
+                    .is_none(),
+                "duplicate TypeScript type name: {name}",
+            );
+        }
+        T::visit_dependencies(self);
+    }
+}
+
+fn push_type<T: TS + ?Sized>(output: &mut String, config: &Config) {
+    if let Some(docs) = T::docs() {
+        output.push_str(&docs);
+    }
+    output.push_str("export ");
+    output.push_str(&T::decl(config));
+    output.push_str("\n\n");
 }
 
 fn copy_if_changed(source: &std::path::Path, destination: &std::path::Path) {
@@ -242,22 +204,4 @@ fn lower_camel(name: &str) -> String {
         }
     }
     output
-}
-
-fn typescript_type(rust_type: &str) -> String {
-    let compact = rust_type.replace(' ', "");
-    match compact.as_str() {
-        "String" | "str" | "&str" | "char" => "string".into(),
-        "bool" => "boolean".into(),
-        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128"
-        | "usize" | "f32" | "f64" => "number".into(),
-        "serde_json::Value" => "unknown".into(),
-        _ if compact.starts_with("Option<") && compact.ends_with('>') => {
-            format!("{} | null", typescript_type(&compact[7..compact.len() - 1]))
-        }
-        _ if compact.starts_with("Vec<") && compact.ends_with('>') => {
-            format!("Array<{}>", typescript_type(&compact[4..compact.len() - 1]))
-        }
-        _ => compact,
-    }
 }

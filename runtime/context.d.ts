@@ -1,54 +1,74 @@
-// AUTO-GENERATED from src/reaction/sdk.rs by build.rs.
+// AUTO-GENERATED from src/reaction/sdk_types.rs and sdk.rs by build.rs.
 // Run `cargo check` (or any Cargo build) to regenerate. Do not edit directly.
 
-/** A physical pixel coordinate in the Windows virtual screen coordinate space. */
-export interface ScreenPoint {
-    /** Horizontal physical pixel coordinate. */
-    readonly x: number;
-    /** Vertical physical pixel coordinate. */
-    readonly y: number;
-}
+/**
+ * A complete synchronous operation, shared by native and debug backends.
+ */
+export type ActionStep = { 
+/**
+ * A condition that must complete before the action starts.
+ */
+before: UiCondition | null, 
+/**
+ * The input action to perform.
+ */
+action: InputAction, 
+/**
+ * An attached action performed only after successful input.
+ */
+after: AfterAction | null, 
+/**
+ * Optional description included in the operation log.
+ */
+message: string | null, };
 
-/** A complete synchronous operation, shared by native and debug backends. */
-export interface ActionStep {
-    /** A condition that must complete before the action starts. */
-    readonly before: UiCondition | null;
-    /** The input action to perform. */
-    readonly action: InputAction;
-    /** An attached action performed only after successful input. */
-    readonly after: AfterAction | null;
-    /** Optional description included in the operation log. */
-    readonly message: string | null;
-}
+/**
+ * A side action performed after successful input.
+ */
+export type AfterAction = DelayCondition;
 
-export interface DelayCondition {
-    readonly kind: "delay";
-    readonly durationMs: number;
-}
+/**
+ * Click payload; the enclosing InputAction supplies the kind discriminator.
+ */
+export type ClickInput = { point: ScreenPoint, };
 
-export interface ImageCondition {
-    readonly kind: "image";
-    readonly path: string;
-    readonly timeoutMs?: number;
-    readonly pollIntervalMs?: number;
-}
+/**
+ * A fixed blocking delay, usable before or after an input action.
+ */
+export type DelayCondition = { kind: "delay", durationMs: number, };
 
-/** A blocking prerequisite for an input action. */
-type UiCondition =
-    | DelayCondition
-    | ImageCondition
-;
+/**
+ * Drag payload; the enclosing InputAction supplies the kind discriminator.
+ */
+export type DragInput = { from: ScreenPoint, to: ScreenPoint, durationMs: number, };
 
-/** A side action performed after successful input. */
-export type AfterAction =
-    | { readonly kind: "delay"; readonly durationMs: number; }
-;
+/**
+ * A Perception JSON resource that must match before an input action starts.
+ */
+export type ImageCondition = { kind: "image", path: string, timeoutMs?: number, pollIntervalMs?: number, };
 
-/** An input action independent of its prerequisites and attached actions. */
-export type InputAction =
-    | { readonly kind: "click"; readonly point: ScreenPoint; }
-    | { readonly kind: "drag"; readonly from: ScreenPoint; readonly to: ScreenPoint; readonly durationMs: number; }
-;
+/**
+ * An input action independent of its prerequisites and attached actions.
+ */
+export type InputAction = { "kind": "click" } & ClickInput | { "kind": "drag" } & DragInput;
+
+/**
+ * A physical pixel coordinate in the Windows virtual screen coordinate space.
+ */
+export type ScreenPoint = { 
+/**
+ * Horizontal physical pixel coordinate.
+ */
+x: number, 
+/**
+ * Vertical physical pixel coordinate.
+ */
+y: number, };
+
+/**
+ * A blocking prerequisite for an input action.
+ */
+export type UiCondition = DelayCondition | ImageCondition;
 
 /** Context supplied to the default macro entry point. */
 export interface NyraContext {
