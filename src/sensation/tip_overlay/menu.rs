@@ -1,7 +1,8 @@
-use super::menu_keyboard::MenuKeyboard;
 use super::view::{NoticePlacement, cursor_in_window};
 use crate::{
     controller::ActiveJobState,
+    job::JobConfig,
+    reaction::GlobalHotkeys,
     settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH},
 };
 use bevy::{
@@ -9,6 +10,7 @@ use bevy::{
     text::{FontSourceTemplate, GenericFontFamily},
     window::PrimaryWindow,
 };
+use global_hotkey::hotkey::{Code, HotKey};
 
 pub(super) const ITEM_HEIGHT: f32 = 24.0;
 pub(super) const HINT_HEIGHT: f32 = 16.0;
@@ -18,7 +20,7 @@ const CLOSE_DELAY: f32 = 3.0;
 struct MenuAction {
     shortcut: &'static str,
     label: &'static str,
-    virtual_key: u32,
+    hotkey: HotKey,
     run: fn(),
 }
 
@@ -28,7 +30,12 @@ pub(crate) struct MenuActions(Vec<MenuAction>);
 impl Default for MenuActions {
     fn default() -> Self {
         let mut actions = Self(Vec::new());
-        actions.add("R", "录制 reaction 方案", b'R' as u32, record_reaction_plan);
+        actions.add(
+            "R",
+            "录制 reaction 方案",
+            HotKey::new(None, Code::KeyR),
+            record_reaction_plan,
+        );
         actions
     }
 }
@@ -38,13 +45,13 @@ impl MenuActions {
         &mut self,
         shortcut: &'static str,
         label: &'static str,
-        virtual_key: u32,
+        hotkey: HotKey,
         run: fn(),
     ) {
         self.0.push(MenuAction {
             shortcut,
             label,
-            virtual_key,
+            hotkey,
             run,
         });
     }
@@ -57,8 +64,8 @@ impl MenuActions {
         self.list_height() + HINT_HEIGHT
     }
 
-    pub(crate) fn shortcut_keys(&self) -> Vec<u32> {
-        self.0.iter().map(|action| action.virtual_key).collect()
+    fn shortcut_keys(&self) -> Vec<HotKey> {
+        self.0.iter().map(|action| action.hotkey).collect()
     }
 }
 
@@ -167,15 +174,16 @@ pub(super) fn menu_areas(
 pub(super) fn update_menu(
     time: Res<Time>,
     state: Res<ActiveJobState>,
+    jobs: Res<JobConfig>,
     actions: Res<MenuActions>,
     placement: Res<NoticePlacement>,
     window: Single<&Window, With<PrimaryWindow>>,
     mouse: Res<ButtonInput<MouseButton>>,
-    menu_keyboard: Res<MenuKeyboard>,
+    mut hotkeys: NonSendMut<GlobalHotkeys>,
     mut menu: ResMut<ActionMenu>,
     mut list: Single<&mut Node, With<MenuList>>,
     mut hint: Single<&mut Node, (With<MenuHint>, Without<MenuList>)>,
-) {
+) -> Result<(), BevyError> {
     let window = window.into_inner();
     let cursor = cursor_in_window(window);
     let center = placement.center.unwrap_or(window.resolution.size() * 0.5);
@@ -189,7 +197,8 @@ pub(super) fn update_menu(
     });
     let hovering = over_notice || over_menu;
     let active = state.active_job.is_some();
-    let dismiss_with_escape = menu_keyboard.take_dismissed();
+    let dismiss_key = HotKey::new(None, Code::Escape);
+    let dismiss_with_escape = hotkeys.just_pressed(dismiss_key);
 
     if !active {
         menu.progress = 0.0;
@@ -233,15 +242,29 @@ pub(super) fn update_menu(
     }
 
     let menu_open = active && menu.progress > 0.0;
-    menu_keyboard.set_active(menu_open);
-    for (index, action) in actions.0.iter().enumerate() {
-        if menu_keyboard.take_triggered(index) && menu_open {
+    let mut bindings = Vec::new();
+    // Reaction follows the tip's lifetime, independently of menu visibility.
+    if let Some(reaction) = state
+        .current_index()
+        .and_then(|index| jobs.0.jobs.get(index))
+        .and_then(|job| job.tip().reaction.as_ref())
+    {
+        bindings.push(reaction.hotkey);
+    }
+    if menu_open {
+        bindings.extend(actions.shortcut_keys());
+        bindings.push(dismiss_key);
+    }
+    hotkeys.set_active(&bindings)?;
+    for action in &actions.0 {
+        if menu_open && hotkeys.just_pressed(action.hotkey) {
             (action.run)();
         }
     }
 
     list.top = px((menu.progress - 1.0) * list_height);
     hint.top = px(WINDOW_HEIGHT as f32 + menu.progress * list_height);
+    Ok(())
 }
 
 fn record_reaction_plan() {

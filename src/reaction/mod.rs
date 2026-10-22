@@ -11,10 +11,10 @@ use sdk_types::{ActionStep, AfterAction, InputAction, ScreenPoint, UiCondition};
 use crate::{
     controller::{ActiveJobState, JobProcessing},
     job::JobConfig,
+    sensation::tip_overlay::MenuProcessing,
 };
 use action::execute_action;
 use bevy::{app::AppExit, prelude::*};
-use global_hotkey::HotkeyEvent;
 use serde::Deserialize;
 use std::{
     io::Write,
@@ -62,56 +62,50 @@ pub struct ReactionPlugin;
 
 impl Plugin for ReactionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, update_runner.after(JobProcessing));
+        app.add_systems(PreUpdate, poll_hotkeys).add_systems(
+            Update,
+            update_runner.after(JobProcessing).after(MenuProcessing),
+        );
     }
+}
+
+fn poll_hotkeys(mut hotkeys: NonSendMut<GlobalHotkeys>) {
+    hotkeys.poll();
 }
 
 fn update_runner(
     mut runner: ResMut<ReactionRunner>,
-    mut hotkeys: ResMut<GlobalHotkeys>,
+    mut hotkeys: NonSendMut<GlobalHotkeys>,
     jobs: Res<JobConfig>,
     active_job: Res<ActiveJobState>,
     mut exit: MessageReader<AppExit>,
-) {
+) -> Result<(), BevyError> {
     if exit.read().next().is_some() {
         runner.cancel();
-        let _ = hotkeys.set_active(None);
-        return;
+        hotkeys.set_active(&[])?;
+        return Ok(());
     }
 
     let reaction = active_job
         .current_index()
         .and_then(|index| jobs.0.jobs.get(index))
         .and_then(|job| job.tip().reaction.as_ref());
-    let desired_hotkey = reaction.map(|reaction| reaction.hotkey.clone());
-    if let Err(error) = hotkeys.set_active(desired_hotkey.clone()) {
-        eprintln!("[Reaction] {error}");
-    }
-    for event in hotkeys.drain() {
-        match event {
-            HotkeyEvent::Registered(Some(hotkey)) => {
-                println!("[Reaction] Current global hotkey: {hotkey}");
+    if let Some(reaction) = reaction
+        && hotkeys.just_pressed(reaction.hotkey)
+    {
+        let hotkey = reaction.hotkey;
+        match runner.start(&reaction.script) {
+            Ok(run_id) => println!(
+                "[Reaction {run_id}] Hotkey {hotkey} triggered: {}",
+                reaction.script.display()
+            ),
+            Err(error) => {
+                eprintln!("[Reaction] Hotkey {hotkey} failed to trigger: {error}")
             }
-            HotkeyEvent::Registered(None) => {}
-            HotkeyEvent::RegistrationFailed(error) => eprintln!("[Reaction] {error}"),
-            HotkeyEvent::Triggered(hotkey) if desired_hotkey.as_ref() == Some(&hotkey) => {
-                let Some(reaction) = reaction else {
-                    continue;
-                };
-                match runner.start(&reaction.script) {
-                    Ok(run_id) => println!(
-                        "[Reaction {run_id}] Hotkey {hotkey} triggered: {}",
-                        reaction.script.display()
-                    ),
-                    Err(error) => {
-                        eprintln!("[Reaction] Hotkey {hotkey} failed to trigger: {error}")
-                    }
-                }
-            }
-            HotkeyEvent::Triggered(_) => {}
         }
     }
     runner.poll();
+    Ok(())
 }
 
 #[derive(Deserialize)]

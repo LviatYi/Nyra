@@ -1,6 +1,5 @@
 mod geometry;
 mod menu;
-mod menu_keyboard;
 mod motion;
 mod progress_border;
 mod style;
@@ -8,10 +7,9 @@ mod text_scroll;
 mod view;
 
 pub(crate) use menu::MenuActions;
-pub(crate) use menu_keyboard::MenuKeyboard;
 
 use crate::controller::{ActiveJobState, JobProcessing};
-use crate::sensation::tip_overlay::menu::{ActionMenu, update_menu};
+use crate::sensation::tip_overlay::menu::ActionMenu;
 use crate::sensation::tip_overlay::progress_border::{
     render_border, sync_border_playback, sync_countdown_text,
 };
@@ -22,6 +20,9 @@ use crate::sensation::tip_overlay::view::{
 };
 use bevy::app::{App, PreUpdate, Update};
 use bevy::prelude::*;
+
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct MenuProcessing;
 
 pub(super) fn configure(app: &mut App) {
     app.init_resource::<ActionMenu>()
@@ -44,7 +45,11 @@ pub(super) fn configure(app: &mut App) {
                     .chain()
                     .after(JobProcessing)
                     .run_if(resource_exists::<NoticePlacement>),
-                (sync_overlay_position, update_menu, sync_overlay_hit_test)
+                (
+                    sync_overlay_position,
+                    menu::update_menu.in_set(MenuProcessing),
+                    sync_overlay_hit_test,
+                )
                     .chain()
                     .after(JobProcessing)
                     .run_if(resource_exists::<NoticePlacement>),

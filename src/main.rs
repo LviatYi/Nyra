@@ -150,9 +150,8 @@ fn launch() -> Result<(), String> {
             })
             .collect::<Vec<_>>();
         let runner = ReactionRunner::new(&config.reaction, &config_path, scripts)?;
-        let hotkeys = GlobalHotkeys::new()?;
         configure_render_environment();
-        run(config.jobs, runner, hotkeys, observer)?;
+        run(config.jobs, runner, observer)?;
     }
     Ok(())
 }
@@ -266,11 +265,9 @@ fn validate_config(config: &Jobs) -> Result<(), String> {
 fn run(
     config: Jobs,
     runner: ReactionRunner,
-    hotkeys: GlobalHotkeys,
     observer: Option<PerceptionObserver>,
 ) -> Result<(), String> {
     let menu_actions = sensation::tip_overlay::MenuActions::default();
-    let menu_keys = menu_actions.shortcut_keys();
     let (screen_width, screen_height) = primary_screen_size();
     let mut app = App::new();
     if let Some(observer) = observer {
@@ -279,7 +276,6 @@ fn run(
     app.insert_resource(ClearColor(Color::NONE))
         .insert_resource(JobConfig(config))
         .insert_resource(runner)
-        .insert_resource(hotkeys)
         .insert_resource(menu_actions)
         .add_plugins(
             DefaultPlugins
@@ -316,9 +312,8 @@ fn run(
         .add_plugins(ControllerPlugin)
         .add_plugins(SensoryPlugin)
         .add_plugins(ReactionPlugin);
-    // Winit's event loop must register Raw Input before the menu removes its keyboard entry.
-    let menu_keyboard = sensation::tip_overlay::MenuKeyboard::new(menu_keys)?;
-    app.insert_resource(menu_keyboard).run();
+    let hotkeys = GlobalHotkeys::new().map_err(|error| error.to_string())?;
+    app.insert_non_send(hotkeys).run();
     Ok(())
 }
 
