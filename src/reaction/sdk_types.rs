@@ -75,6 +75,24 @@ pub enum InputAction {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClickInput {
     pub point: ScreenPoint,
+    pub repeat: Option<ClickRepeatOption>,
+}
+
+/// Options for repeating a click action.
+#[derive(Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClickRepeatOption {
+    pub count: u32,
+    pub interval_ms: u64,
+}
+
+impl Default for ClickRepeatOption {
+    fn default() -> Self {
+        Self {
+            count: 1,
+            interval_ms: 50,
+        }
+    }
 }
 
 /// Drag payload; the enclosing InputAction supplies the kind discriminator.

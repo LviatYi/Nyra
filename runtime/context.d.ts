@@ -30,7 +30,12 @@ export type AfterAction = DelayCondition;
 /**
  * Click payload; the enclosing InputAction supplies the kind discriminator.
  */
-export type ClickInput = { point: ScreenPoint, };
+export type ClickInput = { point: ScreenPoint, repeat: ClickRepeatOption | null, };
+
+/**
+ * Options for repeating a click action.
+ */
+export type ClickRepeatOption = { count: number, intervalMs: number, };
 
 /**
  * A fixed blocking delay, usable before or after an input action.

@@ -232,7 +232,8 @@ macro_rules! define_sdk {
 
 include!("sdk.rs");
 
-fn click_screen(point: &ScreenPoint) -> Result<(), String> {
+fn click_screen(execution: &SdkExecution<'_>, point: &ScreenPoint) -> Result<(), String> {
+    execution.check()?;
     #[cfg(windows)]
     unsafe {
         use windows_sys::Win32::UI::{

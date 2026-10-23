@@ -23,11 +23,19 @@ pub(super) fn execute_action(
     if let Some(before) = step.before {
         wait_condition(execution, before).map_err(|error| format!("Before action: {error}"))?;
     }
-    execution.check()?;
     let description = match step.action {
         InputAction::Click(input) => {
             let point = input.point;
-            click_screen(&point)?;
+            if let Some(repeat) = input.repeat {
+                for i in 0..repeat.count {
+                    click_screen(execution, &point)?;
+                    if i < repeat.count - 1 {
+                        execution.delay(Duration::from_millis(repeat.interval_ms))?;
+                    }
+                }
+            } else {
+                click_screen(execution, &point)?;
+            }
             format!("CLICK AT ({}, {})", point.x, point.y)
         }
         InputAction::Drag(input) => {
@@ -107,6 +115,7 @@ fn drag_screen(
         WindowsAndMessaging::SetCursorPos,
     };
 
+    execution.check()?;
     let move_to = |x, y| {
         if unsafe { SetCursorPos(x, y) } == 0 {
             Err(format!(
@@ -166,10 +175,11 @@ fn drag_screen(
 
 #[cfg(not(windows))]
 fn drag_screen(
-    _execution: &SdkExecution<'_>,
+    execution: &SdkExecution<'_>,
     _from: &ScreenPoint,
     _to: &ScreenPoint,
     _duration: Duration,
 ) -> Result<(), String> {
+    execution.check()?;
     Err("Reaction drag currently requires Windows".into())
 }

@@ -1,6 +1,6 @@
 import type {
     ActionStep,
-    AfterAction,
+    AfterAction, ClickRepeatOption,
     DelayCondition,
     ImageCondition,
     InputAction,
@@ -19,7 +19,9 @@ export interface ActionOptions {
     readonly after?: AfterAction | null;
 }
 
-export type ClickOptions = ActionOptions;
+export interface ClickOptions extends ActionOptions {
+    readonly repeat?: ClickRepeatOption;
+}
 
 export interface DragOptions extends ActionOptions {
     /** Time spent moving while holding the left button. Defaults to 300 ms. */
@@ -67,10 +69,10 @@ function milliseconds(value: number, name: string, allowZero: boolean): number {
 function completeBefore(condition: UiCondition | null | undefined): UiCondition | null {
     if (condition == null) return null;
     if (condition.kind === "delay") {
-        return Object.freeze({
+        return {
             kind: "delay",
             durationMs: milliseconds(condition.durationMs, "before.durationMs", true),
-        });
+        };
     }
     if (condition.kind !== "image") throw new Error("Unsupported prerequisite kind");
     if (typeof condition.path !== "string" || condition.path.trim().length === 0) {
@@ -85,16 +87,16 @@ function completeBefore(condition: UiCondition | null | undefined): UiCondition 
     if (pollIntervalMs > timeoutMs) {
         throw new Error("pollIntervalMs cannot exceed timeoutMs");
     }
-    return Object.freeze({kind: "image", path: condition.path, timeoutMs, pollIntervalMs});
+    return {kind: "image", path: condition.path, timeoutMs, pollIntervalMs};
 }
 
 function completeAfter(action: AfterAction | null | undefined): AfterAction | null {
     if (action == null) return null;
     if (action.kind !== "delay") throw new Error("Unsupported attached action kind");
-    return Object.freeze({
+    return {
         kind: "delay",
         durationMs: milliseconds(action.durationMs, "after.durationMs", true),
-    });
+    };
 }
 
 function copyPoint(point: ScreenPoint): ScreenPoint {
@@ -103,7 +105,7 @@ function copyPoint(point: ScreenPoint): ScreenPoint {
     if (x < i32Min || x > i32Max || y < i32Min || y > i32Max) {
         throw new Error("Point is outside the supported coordinate range");
     }
-    return Object.freeze({x: point.x, y: point.y});
+    return {x: point.x, y: point.y};
 }
 
 function count(value: number, name: string): bigint {
@@ -151,13 +153,13 @@ function arrayIndex(index: number, length: number): number {
 export function createLocalMethods(execute: Execute) {
     let defaults: Pick<ActionStep, "before" | "after"> = {
         before: null,
-        after: Object.freeze({kind: "delay", durationMs: 50}),
+        after: {kind: "delay", durationMs: 50},
     };
 
     function performAction(action: InputAction, message: string | null, options?: ActionOptions): void {
         const before = options?.before === undefined ? defaults.before : completeBefore(options.before);
         const after = options?.after === undefined ? defaults.after : completeAfter(options.after);
-        execute(Object.freeze({before, action: Object.freeze(action), after, message}));
+        execute(structuredClone({before, action, after, message}));
     }
 
     function performClick(
@@ -165,7 +167,7 @@ export function createLocalMethods(execute: Execute) {
         message: string | null,
         options?: ClickOptions,
     ): void {
-        performAction({kind: "click", point: copyPoint(point)}, message, options);
+        performAction({kind: "click", point: copyPoint(point), repeat: options?.repeat ?? null}, message, options);
     }
 
     return Object.freeze({
@@ -297,7 +299,7 @@ export function createDebugContext(renderer: DebugRenderer, runId = "debug"): Ny
     return createContext({
         runId,
         execute(step): void {
-            renderer.mark(Object.freeze({sequence: ++sequence, step}));
+            renderer.mark({sequence: ++sequence, step});
         },
         log(message): void {
             renderer.log?.(message);
