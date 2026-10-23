@@ -1,67 +1,67 @@
 mod selector;
 
-use crate::job::{Job, Jobs};
-use bevy::prelude::Resource;
-use serde::{Deserialize, Serialize};
-use std::{
-    fs,
-    path::{Path, PathBuf},
-    sync::{
-        Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
-    },
-    thread,
-    time::{Duration, Instant},
+pub(super) use crate::reaction::sdk_types::Region;
+use crate::reaction::sdk_types::{
+    CaptureTarget, ImageCondition as ConditionConfig, MonitorConfig, PositionUnit, WindowRegion,
 };
+use std::{fs, path::Path};
 
-const CONDITION_VERSION: u32 = 2;
 const DEFAULT_THRESHOLD: f64 = 0.95;
 const DEFAULT_POLL_INTERVAL_MS: u64 = 500;
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct Region {
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
-}
+impl WindowRegion {
+    fn validate(&self) -> Result<(), String> {
+        for value in [self.x, self.y] {
+            let valid = value.is_finite()
+                && value >= 0.0
+                && match self.unit {
+                    PositionUnit::Pixels => value <= u32::MAX as f64 && value.fract() == 0.0,
+                    PositionUnit::Ratio => value <= 1.0,
+                };
+            if !valid {
+                return Err("Window region x and y must be non-negative integer pixels or ratios between 0 and 1".into());
+            }
+        }
+        validate_region(
+            Region {
+                x: 0,
+                y: 0,
+                width: self.width,
+                height: self.height,
+            },
+            u32::MAX,
+            u32::MAX,
+        )?;
+        if matches!(self.unit, PositionUnit::Pixels) {
+            self.resolve(u32::MAX, u32::MAX)?;
+        }
+        Ok(())
+    }
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct MonitorConfig {
-    name: String,
-    width: u32,
-    height: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ConditionConfig {
-    version: u32,
-    target: CaptureTarget,
-    template: PathBuf,
-    threshold: f64,
-    poll_interval_ms: u64,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(tag = "mode", rename_all = "camelCase", deny_unknown_fields)]
-enum CaptureTarget {
-    Screen {
-        monitor: MonitorConfig,
-        region: Region,
-    },
-    Window {
-        title: String,
-        region: Region,
-    },
+    fn resolve(&self, window_width: u32, window_height: u32) -> Result<Region, String> {
+        let (x, y) = match self.unit {
+            PositionUnit::Pixels => (self.x as u32, self.y as u32),
+            PositionUnit::Ratio => (
+                (self.x * f64::from(window_width)).round() as u32,
+                (self.y * f64::from(window_height)).round() as u32,
+            ),
+        };
+        let region = Region {
+            x,
+            y,
+            width: self.width,
+            height: self.height,
+        };
+        validate_region(region, window_width, window_height)?;
+        Ok(region)
+    }
 }
 
 impl CaptureTarget {
-    fn region(&self) -> Region {
+    fn template_size(&self) -> (u32, u32) {
         match self {
-            Self::Screen { region, .. } | Self::Window { region, .. } => *region,
+            Self::Screen { region, .. } => (region.width, region.height),
+            Self::Window { region, .. } => (region.width, region.height),
         }
     }
 }
@@ -82,13 +82,10 @@ pub(crate) struct ImageCondition {
 
 impl ImageCondition {
     #[cfg(target_os = "windows")]
-    pub(crate) fn load(path: &Path) -> Result<Self, String> {
-        let config = load_condition(path)?;
+    pub(crate) fn prepare(config: ConditionConfig, base_dir: &Path) -> Result<Self, String> {
+        validate_condition(&config)?;
         validate_screen_target(&config.target)?;
-        let template_path = path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join(&config.template);
+        let template_path = base_dir.join(&config.template);
         let template = xcap::image::open(&template_path)
             .map_err(|error| {
                 format!(
@@ -97,11 +94,11 @@ impl ImageCondition {
                 )
             })?
             .into_rgba8();
-        let region = config.target.region();
-        if template.width() != region.width || template.height() != region.height {
+        let (width, height) = config.target.template_size();
+        if template.width() != width || template.height() != height {
             return Err(format!(
-                "Template size does not match the region in {}",
-                path.display()
+                "Template size does not match the region: {}",
+                template_path.display()
             ));
         }
         Ok(Self {
@@ -111,7 +108,7 @@ impl ImageCondition {
     }
 
     #[cfg(not(target_os = "windows"))]
-    pub(crate) fn load(_path: &Path) -> Result<Self, String> {
+    pub(crate) fn prepare(_config: ConditionConfig, _base_dir: &Path) -> Result<Self, String> {
         Err("Perception matching currently requires Windows".into())
     }
 
@@ -139,172 +136,17 @@ struct WindowBounds {
 }
 
 #[cfg(target_os = "windows")]
-struct PreparedJobCondition {
-    job_index: usize,
-    condition: ImageCondition,
-}
-
-#[cfg(target_os = "windows")]
-struct WatchedJobCondition {
-    prepared: PreparedJobCondition,
-    next_poll: Instant,
-    matched: bool,
-    capture_failed: bool,
-}
-
-#[derive(Resource)]
-pub struct PerceptionObserver {
-    matches: Arc<Mutex<Vec<usize>>>,
-    stop: Arc<AtomicBool>,
-    worker: Mutex<Option<thread::JoinHandle<()>>>,
-}
-
-impl PerceptionObserver {
-    #[cfg(target_os = "windows")]
-    pub fn new(jobs: &Jobs, config_path: &Path) -> Result<Option<Self>, String> {
-        let base = config_path.parent().unwrap_or_else(|| Path::new("."));
-        let mut conditions = Vec::new();
-        for (job_index, job) in jobs.jobs.iter().enumerate() {
-            let Job::ImagePerception {
-                image: condition, ..
-            } = job
-            else {
-                continue;
-            };
-            let path = base.join(condition);
-            let condition = ImageCondition::load(&path)?;
-            conditions.push(PreparedJobCondition {
-                job_index,
-                condition,
-            });
-        }
-        if conditions.is_empty() {
-            return Ok(None);
-        }
-        let matches = Arc::new(Mutex::new(Vec::new()));
-        let stop = Arc::new(AtomicBool::new(false));
-        let worker_matches = matches.clone();
-        let worker_stop = stop.clone();
-        let worker = thread::Builder::new()
-            .name("perception-tips".into())
-            .spawn(move || watch_tip_conditions(conditions, worker_matches, worker_stop))
-            .map_err(|error| format!("Unable to start perception watcher: {error}"))?;
-        Ok(Some(Self {
-            matches,
-            stop,
-            worker: Mutex::new(Some(worker)),
-        }))
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    pub fn new(jobs: &Jobs, _config_path: &Path) -> Result<Option<Self>, String> {
-        if jobs
-            .jobs
-            .iter()
-            .any(|job| matches!(job, Job::ImagePerception { .. }))
-        {
-            Err("Perception matching currently requires Windows".into())
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub fn matched_job_indexes(&self) -> Vec<usize> {
-        self.matches.lock().unwrap().clone()
-    }
-}
-
-impl Drop for PerceptionObserver {
-    fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(worker) = self.worker.lock().unwrap().take() {
-            let _ = worker.join();
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn watch_tip_conditions(
-    conditions: Vec<PreparedJobCondition>,
-    matches: Arc<Mutex<Vec<usize>>>,
-    stop: Arc<AtomicBool>,
-) {
-    let mut watched = Vec::new();
-    for prepared in conditions {
-        watched.push(WatchedJobCondition {
-            prepared,
-            next_poll: Instant::now(),
-            matched: false,
-            capture_failed: false,
-        });
-    }
-    while !stop.load(Ordering::Relaxed) {
-        let now = Instant::now();
-        for item in &mut watched {
-            if item.matched
-                && let CaptureTarget::Window { title, .. } = &item.prepared.condition.config.target
-                && !window_is_focused(title)
-            {
-                item.matched = false;
-            }
-            if now < item.next_poll {
-                continue;
-            }
-            item.next_poll =
-                now + Duration::from_millis(item.prepared.condition.config.poll_interval_ms);
-            match item.prepared.condition.matches() {
-                Ok(Some(matched)) => {
-                    item.capture_failed = false;
-                    item.matched = matched;
-                }
-                Ok(None) => {
-                    item.capture_failed = false;
-                    item.matched = false;
-                }
-                Err(error) => {
-                    if !item.capture_failed {
-                        eprintln!(
-                            "[Perception] Capture failed for job {}: {error}",
-                            item.prepared.job_index
-                        );
-                    }
-                    item.capture_failed = true;
-                    item.matched = false;
-                }
-            }
-        }
-        let current = watched
-            .iter()
-            .filter(|item| item.matched)
-            .map(|item| item.prepared.job_index)
-            .collect::<Vec<_>>();
-        let mut shared = matches.lock().unwrap();
-        if *shared != current {
-            *shared = current;
-        }
-        drop(shared);
-        let delay = watched
-            .iter()
-            .map(|item| item.next_poll.saturating_duration_since(Instant::now()))
-            .min()
-            .unwrap_or(Duration::from_millis(50))
-            .min(Duration::from_millis(50));
-        thread::sleep(delay);
-    }
-}
-
-#[cfg(target_os = "windows")]
 pub fn record_condition(
-    condition_path: &Path,
+    template_path: &Path,
     record_target: RecordTarget<'_>,
 ) -> Result<(), String> {
-    if condition_path
+    if template_path
         .extension()
-        .is_none_or(|extension| extension != "json")
+        .is_none_or(|extension| extension != "png")
     {
         return Err(format!(
-            "Perception condition path must use the .json extension: {}",
-            condition_path.display()
+            "Perception template path must use the .png extension: {}",
+            template_path.display()
         ));
     }
 
@@ -331,10 +173,8 @@ pub fn record_condition(
             .filter_map(|window| window_bounds(&window).ok())
             .collect::<Vec<_>>(),
         RecordTarget::Window(title) => {
-            if title.trim().is_empty() {
-                return Err("Window title cannot be empty".into());
-            }
-            vec![window_bounds(&window_by_title(title)?)?]
+            validate_window_selector(title)?;
+            vec![window_bounds(&window_by_selector(title)?)?]
         }
         RecordTarget::Screen => Vec::new(),
     };
@@ -394,13 +234,22 @@ pub fn record_condition(
         };
         validate_region(relative_region, window.width, window.height)?;
         CaptureTarget::Window {
-            title: window.title.clone(),
-            region: relative_region,
+            title: match record_target {
+                RecordTarget::Window(title) => title.to_string(),
+                _ => window.title.clone(),
+            },
+            region: WindowRegion {
+                x: f64::from(relative_region.x),
+                y: f64::from(relative_region.y),
+                width: relative_region.width,
+                height: relative_region.height,
+                unit: PositionUnit::Pixels,
+            },
         }
     } else {
         CaptureTarget::Screen {
             monitor: MonitorConfig {
-                name: monitor_name,
+                name: Some(monitor_name),
                 width: monitor_width,
                 height: monitor_height,
             },
@@ -408,33 +257,16 @@ pub fn record_condition(
         }
     };
 
-    let condition_directory = condition_path
+    let template_directory = template_path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(condition_directory).map_err(|error| {
+    fs::create_dir_all(template_directory).map_err(|error| {
         format!(
-            "Unable to create condition directory {}: {error}",
-            condition_directory.display()
+            "Unable to create template directory {}: {error}",
+            template_directory.display()
         )
     })?;
-    let stem = condition_path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .ok_or_else(|| "Perception condition filename must be valid UTF-8".to_string())?;
-    let template_filename = format!("{stem}.png");
-    let template_path = condition_directory.join(&template_filename);
-
-    let condition = ConditionConfig {
-        version: CONDITION_VERSION,
-        target,
-        template: PathBuf::from(template_filename),
-        threshold: DEFAULT_THRESHOLD,
-        poll_interval_ms: DEFAULT_POLL_INTERVAL_MS,
-    };
-    let mut json = serde_json::to_string_pretty(&condition)
-        .map_err(|error| format!("Unable to serialize perception condition: {error}"))?;
-    json.push('\n');
     let mut encoded_template = Vec::new();
     {
         use xcap::image::{
@@ -455,40 +287,43 @@ pub fn record_condition(
         )
         .map_err(|error| format!("Unable to encode template as PNG: {error}"))?;
     }
-    fs::write(&template_path, encoded_template).map_err(|error| {
+    fs::write(template_path, encoded_template).map_err(|error| {
         format!(
             "Unable to save template {}: {error}",
             template_path.display()
         )
     })?;
-    fs::write(condition_path, json).map_err(|error| {
-        format!(
-            "Unable to save condition {}: {error}",
-            condition_path.display()
-        )
-    })?;
-
+    let target_source = match &target {
+        CaptureTarget::Window { title, region } => format!(
+            "{{mode: \"window\", title: {title:?}, region: {{x: {}, y: {}, width: {}, height: {}}}}}",
+            region.x, region.y, region.width, region.height
+        ),
+        CaptureTarget::Screen { monitor, region } => format!(
+            "{{mode: \"screen\", monitor: {{name: {}, width: {}, height: {}}}, region: {{x: {}, y: {}, width: {}, height: {}}}}}",
+            monitor
+                .name
+                .as_ref()
+                .map(|name| format!("{name:?}"))
+                .unwrap_or_else(|| "null".into()),
+            monitor.width,
+            monitor.height,
+            region.x,
+            region.y,
+            region.width,
+            region.height
+        ),
+    };
+    let template = template_path.to_string_lossy();
     println!(
-        "[Perception] Condition: {}\n[Perception] Image: {}",
-        condition_path.display(),
+        "[Perception] Image: {}\nCopy this condition into your script's before option (template path is relative to the main configuration directory):\n{{\n    kind: \"image\",\n    target: {target_source},\n    template: {template:?},\n    threshold: {DEFAULT_THRESHOLD},\n    pollIntervalMs: {DEFAULT_POLL_INTERVAL_MS},\n}}",
         template_path.display()
     );
-    match &condition.target {
-        CaptureTarget::Window { title, region } => println!(
-            "[Perception] Window title: {title}\n[Perception] Relative region: x={} y={} width={} height={}",
-            region.x, region.y, region.width, region.height
-        ),
-        CaptureTarget::Screen { region, .. } => println!(
-            "[Perception] Screen region: x={} y={} width={} height={}",
-            region.x, region.y, region.width, region.height
-        ),
-    }
     Ok(())
 }
 
 #[cfg(not(target_os = "windows"))]
 pub fn record_condition(
-    _condition_path: &Path,
+    _template_path: &Path,
     _record_target: RecordTarget<'_>,
 ) -> Result<(), String> {
     Err("Perception recording currently requires Windows".into())
@@ -512,109 +347,43 @@ fn window_bounds(window: &xcap::Window) -> Result<WindowBounds, String> {
     })
 }
 
-#[cfg(target_os = "windows")]
-pub fn watch_condition(condition_path: &Path) -> Result<(), String> {
-    let condition = load_condition(condition_path)?;
-    validate_screen_target(&condition.target)?;
-
-    let condition_directory = condition_path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let template_path = condition_directory.join(&condition.template);
-    let template = xcap::image::open(&template_path)
-        .map_err(|error| {
-            format!(
-                "Unable to load template {}: {error}",
-                template_path.display()
-            )
-        })?
-        .into_rgba8();
-    let region = condition.target.region();
-    if template.width() != region.width || template.height() != region.height {
-        return Err(format!(
-            "Template is {}x{}, but the configured region is {}x{}",
-            template.width(),
-            template.height(),
-            region.width,
-            region.height
-        ));
-    }
-
-    println!(
-        "[Perception] Watching {} with target {:?} every {} ms; threshold={:.4}; press Ctrl+C to stop",
-        condition_path.display(),
-        condition.target,
-        condition.poll_interval_ms,
-        condition.threshold
-    );
-    let mut sample = 0u64;
-    loop {
-        sample += 1;
-        match capture_target(&condition.target) {
-            Ok(Some(frame)) => {
-                let score = similarity(template.as_raw(), frame.as_raw());
-                let state = if score >= condition.threshold {
-                    "MATCHED"
-                } else {
-                    "NOT_MATCHED"
-                };
-                println!(
-                    "[Perception] sample={sample} state={state} score={score:.4} threshold={:.4}",
-                    condition.threshold
-                );
-            }
-            Ok(None) => {
-                println!("[Perception] sample={sample} state=NOT_MATCHED window is not focused")
-            }
-            Err(error) => {
-                eprintln!("[Perception] sample={sample} state=UNKNOWN capture failed: {error}")
-            }
-        }
-        thread::sleep(Duration::from_millis(condition.poll_interval_ms));
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn watch_condition(_condition_path: &Path) -> Result<(), String> {
-    Err("Perception matching currently requires Windows".into())
-}
-
-fn load_condition(path: &Path) -> Result<ConditionConfig, String> {
-    let source = fs::read_to_string(path)
-        .map_err(|error| format!("Unable to read condition {}: {error}", path.display()))?;
-    let condition: ConditionConfig = serde_json::from_str(&source)
-        .map_err(|error| format!("Unable to parse condition {}: {error}", path.display()))?;
-    if condition.version != CONDITION_VERSION {
-        return Err(format!(
-            "Unsupported perception condition version {}; expected {}",
-            condition.version, CONDITION_VERSION
-        ));
-    }
+fn validate_condition(condition: &ConditionConfig) -> Result<(), String> {
     if !(0.0..=1.0).contains(&condition.threshold) || !condition.threshold.is_finite() {
         return Err("Perception condition threshold must be between 0 and 1".into());
     }
-    if condition.poll_interval_ms == 0 {
-        return Err("Perception condition pollIntervalMs must be greater than 0".into());
+    if condition.timeout_ms == 0
+        || condition.poll_interval_ms == 0
+        || condition.poll_interval_ms > condition.timeout_ms
+    {
+        return Err("Image condition requires 0 < pollIntervalMs <= timeoutMs".into());
     }
     match &condition.target {
         CaptureTarget::Screen { monitor, region } => {
-            if monitor.name.trim().is_empty() {
+            if monitor
+                .name
+                .as_ref()
+                .is_some_and(|name| name.trim().is_empty())
+            {
                 return Err("Perception screen monitor name cannot be empty".into());
             }
             validate_region(*region, monitor.width, monitor.height)?;
         }
         CaptureTarget::Window { title, region } => {
-            if title.trim().is_empty() {
-                return Err("Perception window title cannot be empty".into());
-            }
-            validate_region(*region, u32::MAX, u32::MAX)?;
+            validate_window_selector(title)?;
+            region.validate()?;
         }
     }
-    if condition.template.as_os_str().is_empty() || condition.template.is_absolute() {
-        return Err("Perception condition template must be a relative path".into());
+    if condition.template.trim().is_empty() {
+        return Err("Image condition template cannot be empty".into());
     }
-    Ok(condition)
+    Ok(())
+}
+
+fn validate_window_selector(title: &str) -> Result<(), String> {
+    if title.trim().is_empty() {
+        return Err("Perception window title cannot be empty".into());
+    }
+    Ok(())
 }
 
 fn validate_region(region: Region, monitor_width: u32, monitor_height: u32) -> Result<(), String> {
@@ -648,7 +417,10 @@ fn validate_screen_target(target: &CaptureTarget) -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 fn screen_monitor(config: &MonitorConfig, region: Region) -> Result<xcap::Monitor, String> {
-    let monitor = monitor_by_name(&config.name)?;
+    let monitor = match config.name.as_deref() {
+        Some(name) => monitor_by_name(name)?,
+        None => primary_monitor()?,
+    };
     let width = monitor.width().map_err(|error| error.to_string())?;
     let height = monitor.height().map_err(|error| error.to_string())?;
     if width != config.width || height != config.height {
@@ -672,16 +444,16 @@ fn capture_target(target: &CaptureTarget) -> Result<Option<xcap::image::RgbaImag
                 .map_err(|error| error.to_string())
         }
         CaptureTarget::Window { title, region } => {
-            let window = window_by_title(title)?;
+            let window = window_by_selector(title)?;
             if !window.is_focused().map_err(|error| error.to_string())? {
                 return Ok(None);
             }
             if window.is_minimized().map_err(|error| error.to_string())? {
-                return Err(format!("Window is minimized: {title}"));
+                return Err("Target window is minimized".into());
             }
             let width = window.width().map_err(|error| error.to_string())?;
             let height = window.height().map_err(|error| error.to_string())?;
-            validate_region(*region, width, height)?;
+            let region = region.resolve(width, height)?;
 
             let x = i64::from(window.x().map_err(|error| error.to_string())?) + i64::from(region.x);
             let y = i64::from(window.y().map_err(|error| error.to_string())?) + i64::from(region.y);
@@ -710,34 +482,74 @@ fn capture_target(target: &CaptureTarget) -> Result<Option<xcap::image::RgbaImag
                     };
                 }
             }
-            Err(format!(
-                "Window region is not fully visible on one monitor: {title}"
-            ))
+            Err("Window region is not fully visible on one monitor".into())
         }
     }
 }
 
 #[cfg(target_os = "windows")]
-fn window_is_focused(title: &str) -> bool {
-    window_by_title(title)
-        .and_then(|window| window.is_focused().map_err(|error| error.to_string()))
-        .unwrap_or(false)
-}
-
-#[cfg(target_os = "windows")]
-fn window_by_title(title: &str) -> Result<xcap::Window, String> {
+fn window_by_selector(title: &str) -> Result<xcap::Window, String> {
     let windows =
         xcap::Window::all().map_err(|error| format!("Unable to enumerate windows: {error}"))?;
+    let mut process_matches = windows.iter().filter(|window| {
+        window_process_name(window).is_ok_and(|candidate| candidate.eq_ignore_ascii_case(title))
+    });
+    if let Some(window) = process_matches.next() {
+        if process_matches.next().is_some() {
+            return Err(format!(
+                "Multiple windows match executable filename: {title}; use a unique window title"
+            ));
+        }
+        return Ok(window.clone());
+    }
     let mut matches = windows
         .into_iter()
         .filter(|window| window.title().is_ok_and(|candidate| candidate == title));
     let window = matches
         .next()
-        .ok_or_else(|| format!("Window not found: {title}"))?;
+        .ok_or_else(|| format!("No executable filename or window title matches: {title}"))?;
     if matches.next().is_some() {
         return Err(format!("Multiple windows have the same title: {title}"));
     }
     Ok(window)
+}
+
+#[cfg(target_os = "windows")]
+fn window_process_name(window: &xcap::Window) -> Result<String, String> {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
+        },
+    };
+
+    let pid = window.pid().map_err(|error| error.to_string())?;
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+    if process.is_null() {
+        return Err(format!(
+            "Unable to query process {pid}: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let mut path = vec![0u16; 32_768];
+    let mut length = path.len() as u32;
+    let result = unsafe { QueryFullProcessImageNameW(process, 0, path.as_mut_ptr(), &mut length) };
+    let error = if result == 0 {
+        Some(std::io::Error::last_os_error())
+    } else {
+        None
+    };
+    unsafe { CloseHandle(process) };
+    if let Some(error) = error {
+        return Err(format!(
+            "Unable to read executable path for process {pid}: {error}"
+        ));
+    }
+    let path = String::from_utf16_lossy(&path[..length as usize]);
+    Path::new(&path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .ok_or_else(|| format!("Process {pid} has no executable filename"))
 }
 
 fn crop_rgba(

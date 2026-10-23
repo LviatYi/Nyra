@@ -1,7 +1,7 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Reaction" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
     <option name="buildProfileId" value="dev" />
-    <option name="command" value="run --package nyra --bin nyra -- config.json --run-script examples/reaction.ts" />
+    <option name="command" value="run --package nyra --bin nyra -- config.json --run-script examples/image-test-panel-ready.ts" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <envs />
     <option name="emulateTerminal" value="true" />

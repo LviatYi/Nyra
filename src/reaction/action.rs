@@ -64,31 +64,28 @@ fn wait_condition(execution: &SdkExecution<'_>, condition: UiCondition) -> Resul
             execution.delay(Duration::from_millis(condition.duration_ms))
         }
         UiCondition::Image(condition) => {
-            let path = condition.path;
+            let template = condition.template.clone();
             let timeout_ms = condition.timeout_ms;
             let poll_interval_ms = condition.poll_interval_ms;
-            if path.trim().is_empty() {
-                return Err("Image condition path cannot be empty".into());
-            }
             if timeout_ms == 0 || poll_interval_ms == 0 || poll_interval_ms > timeout_ms {
                 return Err("Image condition requires 0 < pollIntervalMs <= timeoutMs".into());
             }
             let started_at = Instant::now();
             let timeout = Duration::from_millis(timeout_ms);
             let poll_interval = Duration::from_millis(poll_interval_ms);
-            let image = ImageCondition::load(&execution.base_dir.join(&path))?;
+            let image = ImageCondition::prepare(condition, execution.base_dir)?;
             loop {
                 execution.check()?;
                 if started_at.elapsed() >= timeout {
                     return Err(format!(
-                        "Image condition timed out after {timeout_ms} ms: {path}"
+                        "Image condition timed out after {timeout_ms} ms: {template}"
                     ));
                 }
                 let matched = image.matches()?;
                 execution.check()?;
                 if started_at.elapsed() >= timeout {
                     return Err(format!(
-                        "Image condition timed out after {timeout_ms} ms: {path}"
+                        "Image condition timed out after {timeout_ms} ms: {template}"
                     ));
                 }
                 if matched == Some(true) {

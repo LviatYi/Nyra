@@ -23,17 +23,6 @@
       "tip": { "text": "LONG LONG LONG LONG LONG LONG TEXT TIP 3" },
       "interval": 20,
       "showTime": 10
-    },
-    {
-      "type": "imagePerception",
-      "tip": {
-        "text": "Simulator panel ready",
-        "reaction": {
-          "hotkey": "Ctrl+Alt+R",
-          "script": "examples/reaction.ts"
-        }
-      },
-      "image": "conditions/panel-ready.json"
     }
   ]
 }

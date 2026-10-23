@@ -8,9 +8,12 @@ import type {
     ScreenPoint,
 } from "./context";
 
-export type {ActionStep, AfterAction, DelayCondition, ImageCondition, InputAction, ScreenPoint} from "./context";
+export type {
+    ActionStep, AfterAction, CaptureTarget, DelayCondition, ImageCondition, InputAction,
+    MonitorConfig, PositionUnit, Region, ScreenPoint, WindowRegion,
+} from "./context";
 
-/** Image resources are Perception JSON files relative to the configuration directory. */
+/** Image conditions contain their target, template and matching settings directly. */
 export type UiCondition = DelayCondition | ImageCondition;
 
 /** Undefined inherits the context default; null explicitly disables a phase. */
@@ -75,8 +78,12 @@ function completeBefore(condition: UiCondition | null | undefined): UiCondition 
         };
     }
     if (condition.kind !== "image") throw new Error("Unsupported prerequisite kind");
-    if (typeof condition.path !== "string" || condition.path.trim().length === 0) {
-        throw new Error("Image condition path cannot be empty");
+    if (typeof condition.template !== "string" || condition.template.trim().length === 0) {
+        throw new Error("Image condition template cannot be empty");
+    }
+    const threshold = condition.threshold ?? 0.95;
+    if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
+        throw new Error("Image condition threshold must be between 0 and 1");
     }
     const timeoutMs = milliseconds(condition.timeoutMs ?? defaultTimeoutMs, "timeoutMs", false);
     const pollIntervalMs = milliseconds(
@@ -87,7 +94,7 @@ function completeBefore(condition: UiCondition | null | undefined): UiCondition 
     if (pollIntervalMs > timeoutMs) {
         throw new Error("pollIntervalMs cannot exceed timeoutMs");
     }
-    return {kind: "image", path: condition.path, timeoutMs, pollIntervalMs};
+    return {kind: "image", target: structuredClone(condition.target), template: condition.template, threshold, timeoutMs, pollIntervalMs};
 }
 
 function completeAfter(action: AfterAction | null | undefined): AfterAction | null {

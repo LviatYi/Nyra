@@ -2,7 +2,7 @@ mod action;
 mod global_hotkey;
 mod process_job;
 mod runner;
-mod sdk_types;
+pub(crate) mod sdk_types;
 
 pub(crate) use global_hotkey::GlobalHotkeys;
 pub use runner::ReactionRunner;

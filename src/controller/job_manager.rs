@@ -1,7 +1,4 @@
-use crate::{
-    job::{Job, JobConfig},
-    perception::PerceptionObserver,
-};
+use crate::job::{Job, JobConfig};
 use bevy::prelude::*;
 use std::time::Duration;
 
@@ -66,7 +63,6 @@ impl JobRuntimeState {
 #[derive(Resource, Default)]
 pub(super) struct JobManager {
     jobs: Vec<JobRuntimeState>,
-    last_conflict: Vec<usize>,
 }
 
 impl JobManager {
@@ -74,7 +70,6 @@ impl JobManager {
         &mut self,
         config: &JobConfig,
         state: &ActiveJobState,
-        matched_jobs: &[usize],
         now: Duration,
     ) -> JobUpdate {
         self.synchronize_job_count(config.0.jobs.len());
@@ -84,25 +79,6 @@ impl JobManager {
             } else {
                 JobUpdate::Unchanged
             };
-        }
-
-        if let [index] = matched_jobs {
-            if state.current_index() == Some(*index) {
-                return JobUpdate::Unchanged;
-            }
-            return JobUpdate::Replace(Some(self.create_job(config, *index, now)));
-        }
-
-        if state.active_job.as_ref().is_some_and(|job| {
-            matches!(
-                &config.0.jobs[job.current_index],
-                Job::ImagePerception { .. }
-            )
-        }) {
-            let next = self
-                .select_next(config, now, None)
-                .map(|index| self.create_job(config, index, now));
-            return JobUpdate::Replace(next);
         }
 
         let Some(active_job) = state.active_job.as_ref() else {
@@ -134,7 +110,6 @@ impl JobManager {
             Job::Interval { show_time, .. } => Some(now.saturating_add(Duration::from_secs(
                 show_time.unwrap_or(crate::settings_default_values::DEFAULT_TIP_SHOW_TIME),
             ))),
-            Job::ImagePerception { .. } => None,
         };
         ActiveJob {
             current_index: index,
@@ -188,22 +163,10 @@ impl JobManager {
 pub(super) fn process_jobs(
     time: Res<Time<Real>>,
     config: Res<JobConfig>,
-    observer: Option<Res<PerceptionObserver>>,
     mut manager: ResMut<JobManager>,
     mut state: ResMut<ActiveJobState>,
 ) {
-    let matched_jobs = observer
-        .map(|observer| observer.matched_job_indexes())
-        .unwrap_or_default();
-    if matched_jobs.len() > 1 && manager.last_conflict != matched_jobs {
-        eprintln!("[Perception] Multiple jobs match simultaneously: {matched_jobs:?}");
-    }
-    manager.last_conflict = if matched_jobs.len() > 1 {
-        matched_jobs.clone()
-    } else {
-        Vec::new()
-    };
-    let update = manager.eval_update_at(&config, &state, &matched_jobs, time.elapsed());
+    let update = manager.eval_update_at(&config, &state, time.elapsed());
     if let JobUpdate::Replace(next) = update {
         state.active_job = next;
     }
@@ -320,7 +283,6 @@ mod tests {
             match self.manager.eval_update_at(
                 &self.config,
                 &self.state,
-                &[],
                 Duration::from_secs(seconds),
             ) {
                 JobUpdate::Unchanged => false,

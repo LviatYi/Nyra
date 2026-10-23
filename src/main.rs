@@ -14,7 +14,6 @@ use std::{
 
 use crate::controller::ControllerPlugin;
 use crate::job::{Job, JobConfig, Jobs, is_valid_tip_color};
-use crate::perception::PerceptionObserver;
 use crate::reaction::{GlobalHotkeys, ReactionConfig, ReactionPlugin, ReactionRunner, RunState};
 use crate::sensation::SensoryPlugin;
 use bevy::{
@@ -43,7 +42,7 @@ fn main() -> ExitCode {
         .any(|arg| arg == "--help" || arg == "-h")
     {
         println!(
-            "Usage:\n  nyra.exe [config.json] [--run-script script.ts]\n  nyra.exe --perception-record condition.json [--window-title title | --screen]\n  nyra.exe --perception-watch condition.json\n\nScript paths are resolved relative to the configuration file directory. Perception recording selects a region on the primary monitor and detects its window by default; --screen records absolute screen coordinates."
+            "Usage:\n  nyra.exe [config.json] [--run-script script.ts]\n  nyra.exe --perception-record template.png [--window-title title-or-app.exe | --process-name app.exe | --screen]\n\nScripts define image conditions inline and pass them to Rust through the SDK. Script and template paths are resolved relative to the configuration file directory. Window selectors match executable filenames first, then window titles; --process-name is an alias for --window-title. Perception recording selects a region on the primary monitor, saves a PNG and prints condition parameters to paste into a script; --screen records absolute screen coordinates."
         );
         return ExitCode::SUCCESS;
     }
@@ -69,10 +68,13 @@ fn launch() -> Result<(), String> {
                     perception::RecordTarget::AutoWindow,
                 );
             }
-            "--perception-record" if raw_args.len() == 4 && raw_args[2] == "--window-title" => {
+            "--perception-record"
+                if raw_args.len() == 4
+                    && (raw_args[2] == "--window-title" || raw_args[2] == "--process-name") =>
+            {
                 let title = raw_args[3]
                     .to_str()
-                    .ok_or("--window-title must be valid UTF-8")?;
+                    .ok_or("Window selector must be valid UTF-8")?;
                 configure_render_environment();
                 return perception::record_condition(
                     Path::new(&raw_args[1]),
@@ -86,10 +88,7 @@ fn launch() -> Result<(), String> {
                     perception::RecordTarget::Screen,
                 );
             }
-            "--perception-watch" if raw_args.len() == 2 => {
-                return perception::watch_condition(Path::new(&raw_args[1]));
-            }
-            "--perception-record" | "--perception-watch" => {
+            "--perception-record" => {
                 return Err(format!(
                     "Invalid {command} arguments; use --help to see usage"
                 ));
@@ -137,7 +136,6 @@ fn launch() -> Result<(), String> {
             _ => return Err(format!("[Reaction {run_id}] Runner did not exit normally")),
         }
     } else {
-        let observer = PerceptionObserver::new(&config.jobs, &config_path)?;
         let scripts = config
             .jobs
             .jobs
@@ -151,7 +149,7 @@ fn launch() -> Result<(), String> {
             .collect::<Vec<_>>();
         let runner = ReactionRunner::new(&config.reaction, &config_path, scripts)?;
         configure_render_environment();
-        run(config.jobs, runner, observer)?;
+        run(config.jobs, runner)?;
     }
     Ok(())
 }
@@ -245,12 +243,6 @@ fn validate_config(config: &Jobs) -> Result<(), String> {
                     return Err(format!("{name}.showTime must be greater than 0"));
                 }
             }
-            Job::ImagePerception {
-                image: condition, ..
-            } if condition.as_os_str().is_empty() => {
-                return Err(format!("{name}.condition cannot be empty"));
-            }
-            Job::ImagePerception { .. } => {}
         }
         if let Some(color) = tip.color.as_deref()
             && !is_valid_tip_color(color)
@@ -262,17 +254,10 @@ fn validate_config(config: &Jobs) -> Result<(), String> {
     Ok(())
 }
 
-fn run(
-    config: Jobs,
-    runner: ReactionRunner,
-    observer: Option<PerceptionObserver>,
-) -> Result<(), String> {
+fn run(config: Jobs, runner: ReactionRunner) -> Result<(), String> {
     let menu_actions = sensation::tip_overlay::MenuActions::default();
     let (screen_width, screen_height) = primary_screen_size();
     let mut app = App::new();
-    if let Some(observer) = observer {
-        app.insert_resource(observer);
-    }
     app.insert_resource(ClearColor(Color::NONE))
         .insert_resource(JobConfig(config))
         .insert_resource(runner)

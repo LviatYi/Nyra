@@ -30,16 +30,12 @@ pub enum Job {
         interval: JobTick,
         show_time: Option<JobTick>,
     },
-    ImagePerception {
-        tip: Tip,
-        image: PathBuf,
-    },
 }
 
 impl Job {
     pub fn tip(&self) -> &Tip {
         match self {
-            Self::Interval { tip, .. } | Self::ImagePerception { tip, .. } => tip,
+            Self::Interval { tip, .. } => tip,
         }
     }
 }
