@@ -4,6 +4,11 @@
     "tintWithTheme": true,
     "sizing": { "mode": "stretch" }
   },
+  "floatLight": {
+    "path": "sensation/sensation-layer-float-light@4x.png",
+    "tintWithTheme": true,
+    "sizing": { "mode": "stretch" }
+  },
   "iconBackground": null,
   "borderPath": "sensation/sensation_tip_overlay_border.json",
   "borderWidth": 1

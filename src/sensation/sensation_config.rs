@@ -40,6 +40,7 @@ pub enum LayerSizing {
 pub struct SensationConfig {
     pub base_background: Option<LayerAsset>,
     pub icon_background: Option<LayerAsset>,
+    pub float_light: Option<LayerAsset>,
     pub border_path: Option<String>,
     pub border_width: f32,
 }
@@ -54,6 +55,12 @@ impl Default for SensationConfig {
                 sizing: LayerSizing::Stretch,
             }),
             icon_background: None,
+            float_light: Some(LayerAsset {
+                path: "sensation/sensation-layer-float-light@4x.png".into(),
+                tint_with_theme: true,
+                opacity: 1.0,
+                sizing: LayerSizing::Stretch,
+            }),
             border_path: Some("sensation/sensation_tip_overlay_border.json".into()),
             border_width: 1.0,
         }

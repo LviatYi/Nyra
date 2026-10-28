@@ -1,4 +1,5 @@
 use super::{
+    float_light::FloatLight,
     geometry::BorderGeometry,
     motion::{DRAIN_DURATION, fill_progress},
     style::{set_material_color, tip_color},
@@ -81,6 +82,7 @@ pub(super) fn sync_border_playback(
     jobs: Res<JobConfig>,
     mut fill_value: Single<&mut BorderFillValue>,
     mut drain_value: Single<&mut BorderDrainValue>,
+    mut float_light: Single<&mut FloatLight>,
     outgoing_material: Single<&MeshMaterial2d<ColorMaterial>, With<BorderOutgoing>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
     mut playback: Local<BorderPlayback>,
@@ -100,6 +102,8 @@ pub(super) fn sync_border_playback(
         previous.index != active_job.current_index || previous.started_at != active_job.started_at
     });
     if changed {
+        float_light.started_at = playback.previous_job.map(|_| now);
+        float_light.theme = tip_color(&jobs, active_job.current_index);
         fill_value.progress = if countdown.is_some_and(|(_, total)| total.is_zero()) {
             1.0
         } else {

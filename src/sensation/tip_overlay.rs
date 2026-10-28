@@ -1,3 +1,4 @@
+mod float_light;
 mod geometry;
 mod menu;
 mod motion;
@@ -53,7 +54,11 @@ pub(super) fn configure(app: &mut App) {
                     .chain()
                     .after(JobProcessing)
                     .run_if(resource_exists::<NoticePlacement>),
-                (sync_border_playback, render_border)
+                (
+                    sync_border_playback,
+                    render_border,
+                    float_light::animate_float_light,
+                )
                     .chain()
                     .after(JobProcessing)
                     .run_if(resource_exists::<NoticePlacement>),

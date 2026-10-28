@@ -1,4 +1,5 @@
 use super::{
+    float_light::{FloatLight, float_light_mesh},
     geometry::{BorderGeometry, icon_marker_mesh},
     menu::{
         ActionMenu, HINT_HEIGHT, MenuActions, MenuHint, MenuList, menu_areas, menu_item_scenes,
@@ -77,6 +78,12 @@ pub(super) fn setup_overlay(
     let head_position = border.head_position(0.0);
     let icon_center_x = -(WINDOW_WIDTH as f32) / 2.0 + 30.0;
     let list_height = actions.list_height();
+    let mut float_light_material = color_material(Color::NONE);
+    float_light_material.texture = visuals
+        .float_light
+        .as_ref()
+        .filter(|asset| !asset.path.trim().is_empty())
+        .map(|asset| asset_server.load(asset.path.clone()));
 
     commands.insert_resource(NoticePlacement::default());
     commands.spawn_scene_list(bsn_list! {
@@ -95,6 +102,12 @@ pub(super) fn setup_overlay(
             }
             Transform::from_xyz(0.0, 0.0, 0.1)
             BaseArt
+            --
+            Mesh2d({asset_value(float_light_mesh(0.0))})
+            MeshMaterial2d<ColorMaterial>({asset_value(float_light_material)})
+            Transform::from_xyz(0.0, 0.0, 0.2)
+            Visibility::Hidden
+            FloatLight
             --
             Sprite {
                 color: Color::NONE,
