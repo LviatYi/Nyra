@@ -40,8 +40,12 @@ impl GlobalHotkeys {
         }
         for &hotkey in hotkeys {
             if !self.registered.contains(&hotkey) {
-                self.manager.register(hotkey)?;
-                self.registered.push(hotkey);
+                match self.manager.register(hotkey) {
+                    Ok(()) => self.registered.push(hotkey),
+                    // Keep other applications' bindings and retry on the next update.
+                    Err(global_hotkey::Error::AlreadyRegistered(_)) => continue,
+                    Err(error) => return Err(error),
+                }
             }
         }
         Ok(())

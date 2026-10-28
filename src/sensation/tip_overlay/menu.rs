@@ -181,6 +181,7 @@ pub(super) fn update_menu(
     mouse: Res<ButtonInput<MouseButton>>,
     mut hotkeys: NonSendMut<GlobalHotkeys>,
     mut menu: ResMut<ActionMenu>,
+    mut escape_was_down: Local<bool>,
     mut list: Single<&mut Node, With<MenuList>>,
     mut hint: Single<&mut Node, (With<MenuHint>, Without<MenuList>)>,
 ) -> Result<(), BevyError> {
@@ -197,8 +198,9 @@ pub(super) fn update_menu(
     });
     let hovering = over_notice || over_menu;
     let active = state.active_job.is_some();
-    let dismiss_key = HotKey::new(None, Code::Escape);
-    let dismiss_with_escape = hotkeys.just_pressed(dismiss_key);
+    let escape_down = escape_is_down();
+    let dismiss_with_escape = escape_down && !*escape_was_down;
+    *escape_was_down = escape_down;
 
     if !active {
         menu.progress = 0.0;
@@ -253,7 +255,6 @@ pub(super) fn update_menu(
     }
     if menu_open {
         bindings.extend(actions.shortcut_keys());
-        bindings.push(dismiss_key);
     }
     hotkeys.set_active(&bindings)?;
     for action in &actions.0 {
@@ -265,6 +266,19 @@ pub(super) fn update_menu(
     list.top = px((menu.progress - 1.0) * list_height);
     hint.top = px(WINDOW_HEIGHT as f32 + menu.progress * list_height);
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn escape_is_down() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_ESCAPE};
+
+    // Reading the current state does not register or consume the key.
+    unsafe { GetAsyncKeyState(i32::from(VK_ESCAPE)) < 0 }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn escape_is_down() -> bool {
+    false
 }
 
 fn record_reaction_plan() {
