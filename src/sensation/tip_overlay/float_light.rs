@@ -7,7 +7,7 @@ use crate::{
 use bevy::prelude::*;
 use std::time::Duration;
 
-const FADE_DURATION: Duration = Duration::from_millis(90);
+const FADE_DURATION: Duration = Duration::from_millis(500);
 
 #[derive(Component, Default, Clone)]
 pub(super) struct FloatLight {

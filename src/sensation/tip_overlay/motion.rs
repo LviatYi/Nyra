@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use std::time::Duration;
 
-pub(super) const DRAIN_DURATION: Duration = Duration::from_millis(180);
+pub(super) const DRAIN_DURATION: Duration = Duration::from_millis(200);
 
 pub(super) fn fill_progress(time: f32) -> f32 {
     let accelerate_until = 0.25;
