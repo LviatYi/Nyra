@@ -119,14 +119,22 @@ ctx.set_defaults({
 });
 ctx.click({x: 640, y: 360});
 ctx.click({x: 840, y: 360}, {
-    before: {kind: "image", path: "conditions/menu.json", timeoutMs: 3000},
+    before: {
+        kind: "image", template: "conditions/menu.png", timeoutMs: 3000,
+        target: {mode: "window", title: "game.exe", region: {x: 100, y: 100, width: 32, height: 32}},
+        offsetTolerance: 16,
+    },
     after: null,
 });
 ctx.drag({x: 640, y: 360}, {x: 840, y: 360}, {before: null, durationMs: 300});
 ```
 
-事前条件支持固定等待和已有 Perception JSON 图片条件；图片条件默认超时 3000 ms、轮询间隔 50 ms，路径相对主配置目录，
-匹配阈值及模板路径取自条件文件。未匹配或目标失焦时继续等待；捕获失败、资源错误或超时会阻止本次输入。
+事前条件支持固定等待和图片条件；图片条件默认超时 3000 ms、轮询间隔 50 ms，模板路径相对主配置目录。
+`offsetTolerance` 是各方向允许的物理像素偏移，默认 16，设为 0 禁用偏移搜索；区域尺寸与模板一致。
+`threshold` 默认 0.95，分数为 1 减去 RGB 均方差除以 255²，与旧版平均绝对差分数不同，需重新调整。
+匹配成功的偏移记在内存中并定期写入主配置目录的 `.nyra-impressions.json`；超过 10 个不同偏移后进入混沌模式，
+不再优先检查历史位置。正常退出会刷新，异常退出可能损失最近的更新；关闭 Nyra 后删除该文件可重置印象。
+未匹配或目标失焦时继续等待；捕获失败、资源错误或超时会阻止本次输入。
 事后动作当前支持固定等待，仅在输入成功后执行。`set_defaults` 同样作用于点击辅助方法和拖拽，每次宏调用重新创建默认值。
 旧 `delayMs` 请迁移为 `after: {kind: "delay", durationMs: ...}`；旧占位 `condition` 参数改由 `before` 表达。
 
@@ -156,7 +164,9 @@ Rust 独立管理取消及整轮超时；`delay` 按最多 10 ms 的等待分段
 仅开发运行器时可用 `cargo build --locked`，再执行
 `./scripts/package.ps1 -Executable ./target/debug/nyra.exe -OutputDirectory ./target/distribution/Nyra-dev`。
 
-在 RustRover 中开发时，先运行 `./scripts/prepare-dev-env.ps1`。该脚本调用 `install-bun-runtime.ps1 -RuntimeDirectory <路径>`
+开发前运行 `./scripts/prepare-dev-env.ps1`。需要已引导的 vcpkg、MSVC C++ 工具链及 libclang；设置 `VCPKG_ROOT`，若无法自动发现 libclang 则设置 `LIBCLANG_PATH`。脚本要求 vcpkg 的 opencv4 端口为 4.12.0#1，在 `target/opencv-dev` 中准备动态库，为 Cargo 生成本机专用的 `.cargo/config.toml`，并将开发用 DLL 放在 `target/debug`。RustRover 的 Cargo 构建会读取该配置，不需要从准备脚本所在的终端启动 IDE。脚本不会覆盖已有的自定义 Cargo 配置或不同内容的同名 DLL。
+
+在 RustRover 中开发时，该脚本还调用 `install-bun-runtime.ps1 -RuntimeDirectory <路径>`
 ，将固定版本 Bun 和引导文件准备到 `target/debug/runtime`，并按锁文件安装 TypeScript 开发依赖，再选择共享运行配置
 **Reaction**。 准备脚本优先复用本地已校验的下载缓存，不安装系统级 Bun，也不生成安装包。首次使用、`cargo clean` 后或修改
 `runtime/` 中的文件后重新执行；修改 [examples/reaction.ts](examples/reaction.ts) 后直接重跑配置即可。 该配置启动 Nyra

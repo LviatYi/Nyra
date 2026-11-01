@@ -65,7 +65,11 @@ export type ImageCondition = { kind: "image", target: CaptureTarget,
  */
 template: string, 
 /**
- * Minimum similarity in [0, 1], defaulting to 0.95.
+ * Maximum position deviation in physical pixels on each axis; defaults to 16.
+ */
+offsetTolerance?: number, 
+/**
+ * Minimum score in [0, 1]: 1 minus mean squared RGB difference divided by 255²; defaults to 0.95.
  */
 threshold?: number, timeoutMs?: number, pollIntervalMs?: number, };
 

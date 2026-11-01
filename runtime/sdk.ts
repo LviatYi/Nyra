@@ -85,6 +85,10 @@ function completeBefore(condition: UiCondition | null | undefined): UiCondition 
     if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
         throw new Error("Image condition threshold must be between 0 and 1");
     }
+    const offsetTolerance = condition.offsetTolerance ?? 16;
+    if (!Number.isSafeInteger(offsetTolerance) || offsetTolerance < 0 || offsetTolerance > 1024) {
+        throw new Error("offsetTolerance must be an integer between 0 and 1024");
+    }
     const timeoutMs = milliseconds(condition.timeoutMs ?? defaultTimeoutMs, "timeoutMs", false);
     const pollIntervalMs = milliseconds(
         condition.pollIntervalMs ?? defaultPollIntervalMs,
@@ -94,7 +98,7 @@ function completeBefore(condition: UiCondition | null | undefined): UiCondition 
     if (pollIntervalMs > timeoutMs) {
         throw new Error("pollIntervalMs cannot exceed timeoutMs");
     }
-    return {kind: "image", target: structuredClone(condition.target), template: condition.template, threshold, timeoutMs, pollIntervalMs};
+    return {kind: "image", target: structuredClone(condition.target), template: condition.template, threshold, offsetTolerance, timeoutMs, pollIntervalMs};
 }
 
 function completeAfter(action: AfterAction | null | undefined): AfterAction | null {

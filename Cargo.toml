@@ -8,6 +8,7 @@ bevy = { version = "0.20.0", default-features = false, features = ["ui", "system
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ts-rs = "12.0.1"
+blake3 = "1"
 
 [build-dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -30,6 +31,7 @@ windows-sys = {
     ]
 }
 xcap = "0.9.8"
+opencv = { version = "0.101.1", default-features = false, features = ["imgproc", "clang-runtime"] }
 
 # Perception processes a full 4K RGBA frame in these dependencies. Keeping the
 # application debuggable while optimizing only capture and PNG compression

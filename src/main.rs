@@ -116,11 +116,19 @@ fn launch() -> Result<(), String> {
     }
     let config_path = config_path.unwrap_or_else(|| PathBuf::from("config.json"));
     let config = load_config(&config_path)?;
+    let impression_path = std::path::absolute(&config_path).map_err(|error| error.to_string())?;
+    let impressions = perception::ImpressionStore::open(
+        impression_path
+            .parent()
+            .unwrap()
+            .join(".nyra-impressions.json"),
+    );
     if let Some(script) = script {
         let mut runner = ReactionRunner::new(
             &config.reaction,
             &config_path,
             std::iter::once(script.clone()),
+            impressions.clone(),
         )?;
         let run_id = runner.start(&script)?;
         println!("[Reaction {run_id}] RUNNING SCRIPT {}", script.display());
@@ -147,9 +155,10 @@ fn launch() -> Result<(), String> {
                     .map(|reaction| reaction.script.clone())
             })
             .collect::<Vec<_>>();
-        let runner = ReactionRunner::new(&config.reaction, &config_path, scripts)?;
+        let runner =
+            ReactionRunner::new(&config.reaction, &config_path, scripts, impressions.clone())?;
         configure_render_environment();
-        run(config.jobs, runner)?;
+        run(config.jobs, runner, impressions)?;
     }
     Ok(())
 }
@@ -254,7 +263,11 @@ fn validate_config(config: &Jobs) -> Result<(), String> {
     Ok(())
 }
 
-fn run(config: Jobs, runner: ReactionRunner) -> Result<(), String> {
+fn run(
+    config: Jobs,
+    runner: ReactionRunner,
+    impressions: perception::ImpressionStore,
+) -> Result<(), String> {
     let menu_actions = sensation::tip_overlay::MenuActions::default();
     let (screen_width, screen_height) = primary_screen_size();
     let mut app = App::new();
@@ -294,6 +307,7 @@ fn run(config: Jobs, runner: ReactionRunner) -> Result<(), String> {
                     ..default()
                 }),
         )
+        .add_plugins(perception::ImpressionPlugin(impressions))
         .add_plugins(ControllerPlugin)
         .add_plugins(SensoryPlugin)
         .add_plugins(ReactionPlugin);

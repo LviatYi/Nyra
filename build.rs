@@ -12,6 +12,13 @@ use ts_rs::{Config, TS, TypeVisitor};
 #[path = "src/reaction/sdk_types.rs"]
 mod sdk_types;
 
+#[allow(dead_code)]
+#[path = "src/perception/types.rs"]
+pub mod perception_types;
+mod perception {
+    pub use crate::perception_types as types;
+}
+
 const RUNTIME_FILES: [&str; 5] = [
     "runner.ts",
     "sdk.ts",
@@ -102,6 +109,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/reaction/sdk.rs");
     println!("cargo:rerun-if-changed=src/reaction/sdk_types.rs");
+    println!("cargo:rerun-if-changed=src/perception/types.rs");
     for file in RUNTIME_FILES {
         if file != "context.d.ts" {
             println!("cargo:rerun-if-changed=runtime/{file}");

@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (!$RuntimeDirectory) { $RuntimeDirectory = Join-Path $projectRoot 'target/debug/runtime' }
 $RuntimeDirectory = [IO.Path]::GetFullPath($RuntimeDirectory)
+. (Join-Path $PSScriptRoot 'install-opencv-dev.ps1')
 & (Join-Path $PSScriptRoot 'install-bun-runtime.ps1') -RuntimeDirectory $RuntimeDirectory
 $bun = Join-Path $RuntimeDirectory 'bun.exe'
 
@@ -19,4 +20,4 @@ try {
     Pop-Location
 }
 
-Write-Output "Development environment ready"
+Write-Output "Development environment ready; Cargo and IDE builds use the generated local configuration."

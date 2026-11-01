@@ -107,6 +107,7 @@ impl ReactionRunner {
         config: &super::ReactionConfig,
         config_path: &Path,
         scripts: impl IntoIterator<Item = PathBuf>,
+        impressions: crate::perception::ImpressionStore,
     ) -> Result<Self, String> {
         let executable = std::env::current_exe()
             .map_err(|error| format!("Unable to locate Nyra installation directory: {error}"))?;
@@ -174,6 +175,7 @@ impl ReactionRunner {
                     worker_events,
                     &worker_status,
                     &worker_cancelled,
+                    &impressions,
                     &startup_tx,
                 );
                 if let Err(error) = result {
@@ -321,6 +323,7 @@ fn run_worker(
     event_tx: mpsc::SyncSender<WorkerEvent>,
     status: &Mutex<RunStatus>,
     cancelled: &AtomicBool,
+    impressions: &crate::perception::ImpressionStore,
     startup: &mpsc::SyncSender<Result<(), String>>,
 ) -> Result<(), String> {
     let mut bun_config = std::ffi::OsString::from("--config=");
@@ -399,6 +402,7 @@ fn run_worker(
                 started_at: run.started_at,
                 timeout,
                 base_dir: cwd,
+                impressions,
             };
             if let Err(error) = execution.check() {
                 break Err(error);
@@ -496,6 +500,7 @@ fn run_worker(
                             started_at: run.started_at,
                             timeout,
                             base_dir: cwd,
+                            impressions,
                         };
                         let result = execute_instruction(&execution, &run_id, instruction);
                         if let Err(error) = execution.check() {

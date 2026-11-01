@@ -1,10 +1,13 @@
+mod impression;
 mod selector;
+pub(crate) mod types;
+pub(crate) use impression::{ImpressionPlugin, ImpressionStore};
 
-pub(super) use crate::reaction::sdk_types::Region;
-use crate::reaction::sdk_types::{
+use std::{fs, path::Path};
+pub(super) use types::Region;
+use types::{
     CaptureTarget, ImageCondition as ConditionConfig, MonitorConfig, PositionUnit, WindowRegion,
 };
-use std::{fs, path::Path};
 
 const DEFAULT_THRESHOLD: f64 = 0.95;
 const DEFAULT_POLL_INTERVAL_MS: u64 = 500;
@@ -77,16 +80,24 @@ pub(crate) struct ImageCondition {
     #[cfg(target_os = "windows")]
     config: ConditionConfig,
     #[cfg(target_os = "windows")]
-    template: Vec<u8>,
+    template: opencv::core::Mat,
+    #[cfg(target_os = "windows")]
+    key: String,
+    #[cfg(target_os = "windows")]
+    impressions: ImpressionStore,
 }
 
 impl ImageCondition {
     #[cfg(target_os = "windows")]
-    pub(crate) fn prepare(config: ConditionConfig, base_dir: &Path) -> Result<Self, String> {
+    pub(crate) fn prepare(
+        config: ConditionConfig,
+        base_dir: &Path,
+        impressions: ImpressionStore,
+    ) -> Result<Self, String> {
         validate_condition(&config)?;
         validate_screen_target(&config.target)?;
         let template_path = base_dir.join(&config.template);
-        let template = xcap::image::open(&template_path)
+        let image = xcap::image::open(&template_path)
             .map_err(|error| {
                 format!(
                     "Unable to load template {}: {error}",
@@ -95,35 +106,159 @@ impl ImageCondition {
             })?
             .into_rgba8();
         let (width, height) = config.target.template_size();
-        if template.width() != width || template.height() != height {
+        if image.width() != width || image.height() != height {
             return Err(format!(
                 "Template size does not match the region: {}",
                 template_path.display()
             ));
         }
+        let mut hash = blake3::Hasher::new();
+        hash.update(b"nyra-offset-impression-v1");
+        hash.update(&serde_json::to_vec(&config.target).map_err(|error| error.to_string())?);
+        hash.update(&config.offset_tolerance.to_le_bytes());
+        hash.update(image.as_raw());
+        let key = hash.finalize().to_hex().to_string();
+        let template = rgba_to_rgb(image.as_raw(), height)?;
         Ok(Self {
             config,
-            template: template.into_raw(),
+            template,
+            key,
+            impressions,
         })
     }
 
     #[cfg(not(target_os = "windows"))]
-    pub(crate) fn prepare(_config: ConditionConfig, _base_dir: &Path) -> Result<Self, String> {
+    pub(crate) fn prepare(
+        _config: ConditionConfig,
+        _base_dir: &Path,
+        _impressions: ImpressionStore,
+    ) -> Result<Self, String> {
         Err("Perception matching currently requires Windows".into())
     }
 
     /// None means the target is unavailable, never a successful match.
     #[cfg(target_os = "windows")]
     pub(crate) fn matches(&self) -> Result<Option<bool>, String> {
-        capture_target(&self.config.target).map(|frame| {
-            frame.map(|frame| similarity(&self.template, frame.as_raw()) >= self.config.threshold)
-        })
+        use impression::Offset;
+        use opencv::{
+            core::{self, Mat, Point, Rect},
+            imgproc,
+            prelude::*,
+        };
+        let Some((image, origin)) =
+            capture_target(&self.config.target, self.config.offset_tolerance)?
+        else {
+            return Ok(None);
+        };
+        let frame = rgba_to_rgb(image.as_raw(), image.height())?;
+        let width = self.template.cols();
+        let height = self.template.rows();
+        let denominator = f64::from(width) * f64::from(height) * 3.0 * 255.0 * 255.0;
+        let threshold = self.config.threshold;
+        let mut offsets = self.impressions.offsets(&self.key);
+        offsets.push(Offset { x: 0, y: 0 });
+        for offset in offsets {
+            if offset.x.unsigned_abs() > self.config.offset_tolerance
+                || offset.y.unsigned_abs() > self.config.offset_tolerance
+            {
+                continue;
+            }
+            let x = origin.x + offset.x;
+            let y = origin.y + offset.y;
+            if x < 0 || y < 0 || x + width > frame.cols() || y + height > frame.rows() {
+                continue;
+            }
+            let roi = Mat::roi(&frame, Rect::new(x, y, width, height))
+                .map_err(|error| error.to_string())?;
+            let mut result = Mat::default();
+            imgproc::match_template(
+                &roi,
+                &self.template,
+                &mut result,
+                imgproc::TM_SQDIFF,
+                &core::no_array(),
+            )
+            .map_err(|error| error.to_string())?;
+            let score = 1.0
+                - f64::from(
+                    *result
+                        .at_2d::<f32>(0, 0)
+                        .map_err(|error| error.to_string())?,
+                )
+                .max(0.0)
+                    / denominator;
+            if score >= threshold {
+                self.impressions.observe(&self.key, offset);
+                return Ok(Some(true));
+            }
+        }
+        if self.config.offset_tolerance == 0 {
+            return Ok(Some(false));
+        }
+        let mut result = Mat::default();
+        imgproc::match_template(
+            &frame,
+            &self.template,
+            &mut result,
+            imgproc::TM_SQDIFF,
+            &core::no_array(),
+        )
+        .map_err(|error| error.to_string())?;
+        let mut min = 0.0;
+        let mut location = Point::default();
+        core::min_max_loc(
+            &result,
+            Some(&mut min),
+            None,
+            Some(&mut location),
+            None,
+            &core::no_array(),
+        )
+        .map_err(|error| error.to_string())?;
+        if 1.0 - min.max(0.0) / denominator >= threshold {
+            self.impressions.observe(
+                &self.key,
+                Offset {
+                    x: location.x - origin.x,
+                    y: location.y - origin.y,
+                },
+            );
+            Ok(Some(true))
+        } else {
+            Ok(Some(false))
+        }
     }
 
     #[cfg(not(target_os = "windows"))]
     pub(crate) fn matches(&self) -> Result<Option<bool>, String> {
         Err("Perception matching currently requires Windows".into())
     }
+}
+
+#[cfg(target_os = "windows")]
+fn rgba_to_rgb(bytes: &[u8], height: u32) -> Result<opencv::core::Mat, String> {
+    use opencv::{
+        core::{self, Mat},
+        imgproc,
+        prelude::*,
+    };
+    let flat = Mat::from_slice(bytes).map_err(|error| error.to_string())?;
+    let rgba = flat
+        .reshape(
+            4,
+            i32::try_from(height).map_err(|_| "Image height is too large")?,
+        )
+        .map_err(|error| error.to_string())?;
+    let mut rgb = Mat::default();
+    imgproc::cvt_color(
+        &rgba,
+        &mut rgb,
+        imgproc::COLOR_RGBA2RGB,
+        0,
+        core::AlgorithmHint::ALGO_HINT_DEFAULT,
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(rgb)
 }
 
 #[cfg(target_os = "windows")]
@@ -351,6 +486,9 @@ fn validate_condition(condition: &ConditionConfig) -> Result<(), String> {
     if !(0.0..=1.0).contains(&condition.threshold) || !condition.threshold.is_finite() {
         return Err("Perception condition threshold must be between 0 and 1".into());
     }
+    if condition.offset_tolerance > 1024 {
+        return Err("offsetTolerance cannot exceed 1024 pixels".into());
+    }
     if condition.timeout_ms == 0
         || condition.poll_interval_ms == 0
         || condition.poll_interval_ms > condition.timeout_ms
@@ -434,14 +572,15 @@ fn screen_monitor(config: &MonitorConfig, region: Region) -> Result<xcap::Monito
 }
 
 #[cfg(target_os = "windows")]
-fn capture_target(target: &CaptureTarget) -> Result<Option<xcap::image::RgbaImage>, String> {
-    match target {
+fn capture_target(
+    target: &CaptureTarget,
+    tolerance: u32,
+) -> Result<Option<(xcap::image::RgbaImage, opencv::core::Point)>, String> {
+    use opencv::core::Point;
+    let (monitor, nominal, bounds) = match target {
         CaptureTarget::Screen { monitor, region } => {
-            let monitor = screen_monitor(monitor, *region)?;
-            monitor
-                .capture_region(region.x, region.y, region.width, region.height)
-                .map(Some)
-                .map_err(|error| error.to_string())
+            let selected = screen_monitor(monitor, *region)?;
+            (selected, *region, (monitor.width, monitor.height))
         }
         CaptureTarget::Window { title, region } => {
             let window = window_by_selector(title)?;
@@ -453,37 +592,88 @@ fn capture_target(target: &CaptureTarget) -> Result<Option<xcap::image::RgbaImag
             }
             let width = window.width().map_err(|error| error.to_string())?;
             let height = window.height().map_err(|error| error.to_string())?;
-            let region = region.resolve(width, height)?;
-
-            let x = i64::from(window.x().map_err(|error| error.to_string())?) + i64::from(region.x);
-            let y = i64::from(window.y().map_err(|error| error.to_string())?) + i64::from(region.y);
-            let monitors = xcap::Monitor::all()
-                .map_err(|error| format!("Unable to enumerate monitors: {error}"))?;
+            let local = region.resolve(width, height)?;
+            let wx = i64::from(window.x().map_err(|error| error.to_string())?);
+            let wy = i64::from(window.y().map_err(|error| error.to_string())?);
+            let monitors = xcap::Monitor::all().map_err(|error| error.to_string())?;
+            let mut found = None;
             for monitor in monitors {
-                let monitor_x = i64::from(monitor.x().map_err(|error| error.to_string())?);
-                let monitor_y = i64::from(monitor.y().map_err(|error| error.to_string())?);
-                let monitor_width = i64::from(monitor.width().map_err(|error| error.to_string())?);
-                let monitor_height =
-                    i64::from(monitor.height().map_err(|error| error.to_string())?);
-                let local_x = x - monitor_x;
-                let local_y = y - monitor_y;
-                if local_x >= 0
-                    && local_y >= 0
-                    && local_x + i64::from(region.width) <= monitor_width
-                    && local_y + i64::from(region.height) <= monitor_height
+                let mx = i64::from(monitor.x().map_err(|error| error.to_string())?);
+                let my = i64::from(monitor.y().map_err(|error| error.to_string())?);
+                let mw = monitor.width().map_err(|error| error.to_string())?;
+                let mh = monitor.height().map_err(|error| error.to_string())?;
+                let x = wx + i64::from(local.x) - mx;
+                let y = wy + i64::from(local.y) - my;
+                if x >= 0
+                    && y >= 0
+                    && x + i64::from(local.width) <= i64::from(mw)
+                    && y + i64::from(local.height) <= i64::from(mh)
                 {
-                    let frame = monitor
-                        .capture_region(local_x as u32, local_y as u32, region.width, region.height)
-                        .map_err(|error| error.to_string())?;
-                    return if window.is_focused().map_err(|error| error.to_string())? {
-                        Ok(Some(frame))
-                    } else {
-                        Ok(None)
-                    };
+                    let left = (mx - wx).max(0) as u32;
+                    let top = (my - wy).max(0) as u32;
+                    let right = (mx + i64::from(mw) - wx).min(i64::from(width)) as u32;
+                    let bottom = (my + i64::from(mh) - wy).min(i64::from(height)) as u32;
+                    found = Some((monitor, local, (left, top, right, bottom), (mx, my)));
+                    break;
                 }
             }
-            Err("Window region is not fully visible on one monitor".into())
+            let (monitor, local, (left, top, right, bottom), (mx, my)) =
+                found.ok_or("Window region is not fully visible on one monitor")?;
+            let clipped = expand_region(local, tolerance, left, top, right, bottom);
+            let origin = Point::new((local.x - clipped.x) as i32, (local.y - clipped.y) as i32);
+            let x =
+                u32::try_from(wx + i64::from(clipped.x) - mx).map_err(|error| error.to_string())?;
+            let y =
+                u32::try_from(wy + i64::from(clipped.y) - my).map_err(|error| error.to_string())?;
+            let frame = monitor
+                .capture_region(x, y, clipped.width, clipped.height)
+                .map_err(|error| error.to_string())?;
+            return if window.is_focused().map_err(|error| error.to_string())? {
+                Ok(Some((frame, origin)))
+            } else {
+                Ok(None)
+            };
         }
+    };
+    let clipped = expand_region(nominal, tolerance, 0, 0, bounds.0, bounds.1);
+    let frame = monitor
+        .capture_region(clipped.x, clipped.y, clipped.width, clipped.height)
+        .map_err(|error| error.to_string())?;
+    Ok(Some((
+        frame,
+        Point::new(
+            (nominal.x - clipped.x) as i32,
+            (nominal.y - clipped.y) as i32,
+        ),
+    )))
+}
+
+#[cfg(target_os = "windows")]
+fn expand_region(
+    region: Region,
+    tolerance: u32,
+    left: u32,
+    top: u32,
+    right: u32,
+    bottom: u32,
+) -> Region {
+    let x = region.x.saturating_sub(tolerance).max(left);
+    let y = region.y.saturating_sub(tolerance).max(top);
+    let end_x = region
+        .x
+        .saturating_add(region.width)
+        .saturating_add(tolerance)
+        .min(right);
+    let end_y = region
+        .y
+        .saturating_add(region.height)
+        .saturating_add(tolerance)
+        .min(bottom);
+    Region {
+        x,
+        y,
+        width: end_x - x,
+        height: end_y - y,
     }
 }
 
@@ -582,21 +772,6 @@ fn crop_rgba(
         cropped.extend_from_slice(&source[row_start..row_start + row_bytes]);
     }
     Ok(cropped)
-}
-
-fn similarity(template: &[u8], frame: &[u8]) -> f64 {
-    if template.len() != frame.len() || template.is_empty() {
-        return 0.0;
-    }
-    let mut difference = 0u64;
-    let mut channel_count = 0u64;
-    for (template_pixel, frame_pixel) in template.chunks_exact(4).zip(frame.chunks_exact(4)) {
-        for channel in 0..3 {
-            difference += template_pixel[channel].abs_diff(frame_pixel[channel]) as u64;
-            channel_count += 1;
-        }
-    }
-    1.0 - difference as f64 / (channel_count * u8::MAX as u64) as f64
 }
 
 #[cfg(target_os = "windows")]

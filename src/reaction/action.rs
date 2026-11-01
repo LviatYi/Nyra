@@ -73,7 +73,11 @@ fn wait_condition(execution: &SdkExecution<'_>, condition: UiCondition) -> Resul
             let started_at = Instant::now();
             let timeout = Duration::from_millis(timeout_ms);
             let poll_interval = Duration::from_millis(poll_interval_ms);
-            let image = ImageCondition::prepare(condition, execution.base_dir)?;
+            let image = ImageCondition::prepare(
+                condition,
+                execution.base_dir,
+                execution.impressions.clone(),
+            )?;
             loop {
                 execution.check()?;
                 if started_at.elapsed() >= timeout {

@@ -121,6 +121,7 @@ struct SdkExecution<'a> {
     started_at: Instant,
     timeout: Duration,
     base_dir: &'a Path,
+    impressions: &'a crate::perception::ImpressionStore,
 }
 
 impl SdkExecution<'_> {

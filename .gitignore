@@ -1,5 +1,6 @@
 /target
 /node_modules
+/.cargo/config.toml
 
 # Rustrover
 /.idea/workspace.xml
