@@ -1,5 +1,22 @@
 {
+  "reaction": { "timeoutMs": 510000 },
   "jobs": [
+    {
+      "type": "initiative",
+      "tip": {
+        "text": "Debug icon appears",
+        "reaction": {
+          "hotkey": "Ctrl+Alt+Q",
+          "script": "examples/reaction.ts"
+        }
+      },
+      "condition": {
+        "kind": "image",
+        "template": "examples/debug-icon.png",
+        "threshold": 0.998,
+        "search": {"kind": "position", "position": {"x": 3151, "y": 0, "tolerance": 50}}
+      }
+    },
     {
       "type": "interval",
       "tip": {

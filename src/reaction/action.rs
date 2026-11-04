@@ -36,14 +36,24 @@ pub(super) fn execute_action(
             } else {
                 click_screen(execution, &point)?;
             }
-            format!("CLICK AT ({}, {})", point.x, point.y)
+            Some(format!("CLICK AT ({}, {})", point.x, point.y))
         }
         InputAction::Drag(input) => {
             let from = input.from;
             let to = input.to;
             let duration_ms = input.duration_ms;
             drag_screen(execution, &from, &to, Duration::from_millis(duration_ms))?;
-            format!("DRAG FROM ({}, {}) TO ({}, {})", from.x, from.y, to.x, to.y)
+            Some(format!(
+                "DRAG FROM ({}, {}) TO ({}, {})",
+                from.x, from.y, to.x, to.y
+            ))
+        }
+        InputAction::Log(input) => {
+            if input.message.encode_utf16().count() > 2000 {
+                return Err("log(message) length cannot exceed 2000 UTF-16 code units".into());
+            }
+            log_in_reaction(run_id, line, &input.message)?;
+            None
         }
     };
     if let Some(AfterAction::Delay(condition)) = step.after {
@@ -51,11 +61,15 @@ pub(super) fn execute_action(
             .delay(Duration::from_millis(condition.duration_ms))
             .map_err(|error| format!("After action: {error}"))?;
     }
-    log_in_reaction(
-        run_id,
-        line,
-        step.message.as_deref().unwrap_or(&description),
-    )
+    if let Some(description) = description {
+        log_in_reaction(
+            run_id,
+            line,
+            step.message.as_deref().unwrap_or(&description),
+        )
+    } else {
+        Ok(())
+    }
 }
 
 fn wait_condition(execution: &SdkExecution<'_>, condition: UiCondition) -> Result<(), String> {
@@ -65,8 +79,9 @@ fn wait_condition(execution: &SdkExecution<'_>, condition: UiCondition) -> Resul
         }
         UiCondition::Image(condition) => {
             let template = condition.template.clone();
-            let timeout_ms = condition.timeout_ms;
-            let poll_interval_ms = condition.poll_interval_ms;
+            let scale_invariant = condition.scale_invariant;
+            let timeout_ms = condition.timeout_ms();
+            let poll_interval_ms = condition.poll_interval_ms();
             if timeout_ms == 0 || poll_interval_ms == 0 || poll_interval_ms > timeout_ms {
                 return Err("Image condition requires 0 < pollIntervalMs <= timeoutMs".into());
             }
@@ -85,6 +100,7 @@ fn wait_condition(execution: &SdkExecution<'_>, condition: UiCondition) -> Resul
                         "Image condition timed out after {timeout_ms} ms: {template}"
                     ));
                 }
+                let poll_started = Instant::now();
                 let matched = image.matches()?;
                 execution.check()?;
                 if started_at.elapsed() >= timeout {
@@ -95,7 +111,12 @@ fn wait_condition(execution: &SdkExecution<'_>, condition: UiCondition) -> Resul
                 if matched == Some(true) {
                     return Ok(());
                 }
-                execution.delay(poll_interval.min(timeout.saturating_sub(started_at.elapsed())))?;
+                let delay = if scale_invariant {
+                    poll_interval.saturating_sub(poll_started.elapsed())
+                } else {
+                    poll_interval
+                };
+                execution.delay(delay.min(timeout.saturating_sub(started_at.elapsed())))?;
             }
         }
     }

@@ -23,10 +23,20 @@ struct OffsetImpression {
     chaotic: bool,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct ScaleImpression {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+}
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 struct Impressions {
     version: u32,
     offsets: HashMap<String, OffsetImpression>,
+    #[serde(default)]
+    scales: HashMap<String, ScaleImpression>,
 }
 
 struct State {
@@ -129,6 +139,18 @@ impl ImpressionStore {
             .filter(|entry| !entry.chaotic)
             .map(|entry| entry.offsets.clone())
             .unwrap_or_default()
+    }
+    pub(crate) fn scale(&self, key: &str) -> Option<ScaleImpression> {
+        self.0.state.lock().unwrap().data.scales.get(key).copied()
+    }
+
+    pub(crate) fn observe_scale(&self, key: &str, impression: ScaleImpression) {
+        let mut state = self.0.state.lock().unwrap();
+        if state.data.scales.get(key) == Some(&impression) {
+            return;
+        }
+        state.data.scales.insert(key.to_owned(), impression);
+        state.generation += 1;
     }
     pub(crate) fn observe(&self, key: &str, offset: Offset) {
         if offset == (Offset { x: 0, y: 0 }) {

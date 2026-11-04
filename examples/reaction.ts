@@ -1,7 +1,12 @@
 import type { NyraContext } from "../runtime/sdk";
 
 export default function reaction(ctx: NyraContext) {
-    // Applies to subsequent clicks, click helpers and drags in this invocation.
+    ctx.log("reaction");
+    ctx.log("target icon appears", {
+        before: {kind: "image", template: "examples/debug-icon-scaled.png", scaleInvariant: true, threshold: 0.998, timeoutMs: 500000},
+        after: null,
+    });
+    // Applies to subsequent logs, clicks, click helpers and drags in this invocation.
     ctx.set_defaults({
         before: {kind: "delay", durationMs: 100},
         after: {kind: "delay", durationMs: 50},

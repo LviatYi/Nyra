@@ -63,6 +63,32 @@ cargo run --locked -- "D:\Configs\nyra.json"
 
 边框剩余部分使用当前项颜色，已消耗部分使用预计下一项颜色。长文本会按估算宽度截断并追加 `...`。
 
+## 主动任务
+
+`jobs` 中可以同时配置周期任务与主动任务。主动任务的 `condition` 与 Reaction 使用同一个 UI condition 结构，例如：
+
+```json
+{
+  "jobs": [
+    {"type": "interval", "tip": {"text": "定时提醒"}, "interval": 8, "showTime": 5},
+    {
+      "type": "initiative",
+      "tip": {"text": "面板已出现"},
+      "condition": {
+        "kind": "image",
+        "template": "conditions/panel.png",
+        "search": {"kind": "position", "position": {"x": 100, "y": 100, "tolerance": 16}},
+        "pollIntervalMs": 250
+      }
+    }
+  ]
+}
+```
+
+图像路径相对主配置文件目录。条件匹配后主动任务立即优先展示；多条满足时按配置顺序每 5 秒轮转。某个条件下一次观测未能确认匹配、目标不可用或捕获失败时，其任务立即失去资格；可变缩放的分批搜索可能因此产生短暂闪烁。主动任务全部失效后，被打断的周期任务继续展示剩余时长。
+
+主动任务使用 UI condition 中的 `pollIntervalMs` 周期持续观测；`timeoutMs` 仍参与参数校验，但不会让持续监测到期停止。`kind: "delay"` 也可使用，表示从加载任务开始经过该时长后持续满足。当前每帧最多同步检查一个到期图像条件；捕获或匹配较慢、多条条件同时到期时可能影响 UI 帧率和检测延迟。
+
 ## Bun 脚本运行器
 
 Reaction 已接入独立 Bun 子进程运行器、tip 全局快捷键及宿主日志 SDK。正常模式在配置至少一个脚本时启动 Bun，预加载脚本并保持进程到
@@ -121,21 +147,32 @@ ctx.click({x: 640, y: 360});
 ctx.click({x: 840, y: 360}, {
     before: {
         kind: "image", template: "conditions/menu.png", timeoutMs: 3000,
-        target: {mode: "window", title: "game.exe", region: {x: 100, y: 100, width: 32, height: 32}},
-        offsetTolerance: 16,
+        target: {mode: "window", title: "game.exe"},
+        anchor: {x: 0.5, y: 0.5},
+        search: {kind: "position", position: {x: 100, y: 100, tolerance: 16}},
     },
     after: null,
 });
 ctx.drag({x: 640, y: 360}, {x: 840, y: 360}, {before: null, durationMs: 300});
 ```
 
-事前条件支持固定等待和图片条件；图片条件默认超时 3000 ms、轮询间隔 50 ms，模板路径相对主配置目录。
-`offsetTolerance` 是各方向允许的物理像素偏移，默认 16，设为 0 禁用偏移搜索；区域尺寸与模板一致。
-`threshold` 默认 0.95，分数为 1 减去 RGB 均方差除以 255²，与旧版平均绝对差分数不同，需重新调整。
+事前条件支持固定等待和图片条件；固定尺度图片条件默认超时 3000 ms、轮询间隔 50 ms，模板路径相对主配置目录。省略 `target` 时使用主显示器，省略 `search` 时搜索整个目标。
+`anchor` 的 x/y 是模板内 0～1 的比例，默认 `{x: 0, y: 0}`（左上角）；上例的 `{x: 0.5, y: 0.5}` 将图像中心放在窗口相对坐标 `(100, 100)` 附近。`position.tolerance` 是各方向允许的物理像素偏移，默认 16，设为 0 仅检查指定位置。位置默认使用物理像素；可设置 `unit: "ratio"` 使用相对目标宽高的 0～1 比例。
+也可用 `search: {kind: "region", region: {x: 0, y: 0, width: 500, height: 300}}` 限制模板完整出现的范围；位置与范围互斥。范围与位置均相对显示器或窗口左上角。`threshold` 默认 0.95，分数为 1 减去 RGB 均方差除以 255²，与旧版平均绝对差分数不同，需重新调整。
 匹配成功的偏移记在内存中并定期写入主配置目录的 `.nyra-impressions.json`；超过 10 个不同偏移后进入混沌模式，
 不再优先检查历史位置。正常退出会刷新，异常退出可能损失最近的更新；关闭 Nyra 后删除该文件可重置印象。
 未匹配或目标失焦时继续等待；捕获失败、资源错误或超时会阻止本次输入。
 事后动作当前支持固定等待，仅在输入成功后执行。`set_defaults` 同样作用于点击辅助方法和拖拽，每次宏调用重新创建默认值。
+也可以在整个显示器中搜索未知等比例缩放的素材：
+
+```typescript
+ctx.click({x: 640, y: 360}, {
+    before: {kind: "image", template: "conditions/icon.png", scaleInvariant: true},
+});
+```
+
+`scaleInvariant` 默认关闭，可与位置或范围组合。启用后先用边缘寻找候选，再以 RGB 颜色确认；`threshold` 默认 0.995，`pollIntervalMs` 默认 250，`timeoutMs` 默认 15000。一次搜索的软预算为 250 ms，但截图或单次 OpenCV 运算可能超时，不保证 4 fps。尺度分批轮换，每帧未检查的尺度不会被当成不存在；超时只表示未能确认匹配。模板须具有可辨识轮廓，小尺寸、插值、背景和颜色变化可能导致漏检或误报，阈值尚需真实样本校准。成功后的位置与尺寸作为印象保存；此功能尚未处理透明背景或旋转。可通过 `target: {mode: "fullScreen", monitorName: "显示器名称"}` 选择其他显示器。
+
 旧 `delayMs` 请迁移为 `after: {kind: "delay", durationMs: ...}`；旧占位 `condition` 参数改由 `before` 表达。
 
 公共 SDK 的 `createContext(backend)` 接受实现 `ReactionBackend` 的后端；原生后端将完整 `ActionStep` 交给 Rust。

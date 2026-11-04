@@ -134,16 +134,17 @@ impl ReactionRunner {
             run_id: None,
             state: RunState::Idle,
         }));
-        // if script_paths.is_empty() {
-        //     return Ok(Self {
-        //         script_base,
-        //         script_ids,
-        //         sequence: 0,
-        //         status,
-        //         events: None,
-        //         worker: None,
-        //     });
-        // }
+        if script_paths.is_empty() {
+            return Ok(Self {
+                script_base,
+                script_ids,
+                sequence: 0,
+                status,
+                cancelled: Arc::new(AtomicBool::new(false)),
+                events: None,
+                worker: None,
+            });
+        }
         for name in ["bun.exe", "runner.ts", "sdk.ts", "bun.json", "bunfig.toml"] {
             let path = runtime_dir.join(name);
             if !path.is_file() {

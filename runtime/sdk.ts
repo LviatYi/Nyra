@@ -2,16 +2,24 @@ import type {
     ActionStep,
     AfterAction, ClickRepeatOption,
     DelayCondition,
-    ImageCondition,
+    ImageCondition as NativeImageCondition,
+    ImagePosition,
+    Region,
     InputAction,
     NyraContext as NativeContext,
     ScreenPoint,
 } from "./context";
 
 export type {
-    ActionStep, AfterAction, CaptureTarget, DelayCondition, ImageCondition, InputAction,
-    MonitorConfig, PositionUnit, Region, ScreenPoint, WindowRegion,
+    ActionStep, AfterAction, CaptureTarget, DelayCondition, InputAction,
+    ImageAnchor, ImagePosition, MonitorConfig, PositionUnit, Region, ScreenPoint,
 } from "./context";
+
+/** Position and region are mutually exclusive. */
+export type ImageSearch =
+    | {kind: "position"; position: ImagePosition; region?: never}
+    | {kind: "region"; region: Region; position?: never};
+export type ImageCondition = Omit<NativeImageCondition, "search"> & {search?: ImageSearch};
 
 /** Image conditions contain their target, template and matching settings directly. */
 export type UiCondition = DelayCondition | ImageCondition;
@@ -81,24 +89,34 @@ function completeBefore(condition: UiCondition | null | undefined): UiCondition 
     if (typeof condition.template !== "string" || condition.template.trim().length === 0) {
         throw new Error("Image condition template cannot be empty");
     }
-    const threshold = condition.threshold ?? 0.95;
+    if (condition.anchor != null && (!Number.isFinite(condition.anchor.x) || !Number.isFinite(condition.anchor.y)
+        || condition.anchor.x < 0 || condition.anchor.x > 1 || condition.anchor.y < 0 || condition.anchor.y > 1)) {
+        throw new Error("Image anchor coordinates must be between 0 and 1");
+    }
+    if (condition.search?.kind === "position") {
+        const {x, y, unit, tolerance = 16} = condition.search.position;
+        if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0
+            || (unit === "ratio" ? x > 1 || y > 1 : !Number.isInteger(x) || !Number.isInteger(y))) {
+            throw new Error("Image position must use non-negative pixel coordinates or ratios between 0 and 1");
+        }
+        if (!Number.isSafeInteger(tolerance) || tolerance < 0 || tolerance > 1024) {
+            throw new Error("Image position tolerance must be an integer between 0 and 1024");
+        }
+    }
+    const threshold = condition.threshold ?? (condition.scaleInvariant ? 0.995 : 0.95);
     if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
         throw new Error("Image condition threshold must be between 0 and 1");
     }
-    const offsetTolerance = condition.offsetTolerance ?? 16;
-    if (!Number.isSafeInteger(offsetTolerance) || offsetTolerance < 0 || offsetTolerance > 1024) {
-        throw new Error("offsetTolerance must be an integer between 0 and 1024");
-    }
-    const timeoutMs = milliseconds(condition.timeoutMs ?? defaultTimeoutMs, "timeoutMs", false);
+    const timeoutMs = milliseconds(condition.timeoutMs ?? (condition.scaleInvariant ? 15_000 : defaultTimeoutMs), "timeoutMs", false);
     const pollIntervalMs = milliseconds(
-        condition.pollIntervalMs ?? defaultPollIntervalMs,
+        condition.pollIntervalMs ?? (condition.scaleInvariant ? 250 : defaultPollIntervalMs),
         "pollIntervalMs",
         false,
     );
     if (pollIntervalMs > timeoutMs) {
         throw new Error("pollIntervalMs cannot exceed timeoutMs");
     }
-    return {kind: "image", target: structuredClone(condition.target), template: condition.template, threshold, offsetTolerance, timeoutMs, pollIntervalMs};
+    return {kind: "image", target: structuredClone(condition.target ?? {mode: "fullScreen"}), template: condition.template, anchor: condition.anchor, search: structuredClone(condition.search), scaleInvariant: condition.scaleInvariant ?? false, threshold, timeoutMs, pollIntervalMs};
 }
 
 function completeAfter(action: AfterAction | null | undefined): AfterAction | null {
@@ -189,6 +207,13 @@ export function createLocalMethods(execute: Execute) {
             defaults = {before, after};
         },
 
+        log(message: string, options?: ActionOptions): void {
+            if (typeof message !== "string" || message.length > 2000) {
+                throw new Error("log(message) must be a string of at most 2000 UTF-16 code units");
+            }
+            performAction({kind: "log", message}, null, options);
+        },
+
         click(point: ScreenPoint, options?: ClickOptions): void {
             performClick(point, null, options);
         },
@@ -273,18 +298,12 @@ export function createLocalMethods(execute: Execute) {
 }
 
 export type LocalContext = ReturnType<typeof createLocalMethods>;
-export type NyraContext = Omit<NativeContext, "execute"> & LocalContext;
+export type NyraContext = Omit<NativeContext, "execute" | "log"> & LocalContext;
 
 /** Creates isolated defaults for one macro invocation, regardless of the execution backend. */
 export function createContext(backend: ReactionBackend): NyraContext {
     return Object.freeze({
         runId: backend.runId,
-        log(message: string): void {
-            if (typeof message !== "string" || message.length > 2000) {
-                throw new Error("log(message) must be a string of at most 2000 UTF-16 code units");
-            }
-            backend.log(message);
-        },
         delay(durationMs: number): void {
             backend.delay(milliseconds(durationMs, "durationMs", true));
         },
@@ -310,7 +329,11 @@ export function createDebugContext(renderer: DebugRenderer, runId = "debug"): Ny
     return createContext({
         runId,
         execute(step): void {
-            renderer.mark({sequence: ++sequence, step});
+            if (step.action.kind === "log") {
+                renderer.log?.(step.action.message);
+            } else {
+                renderer.mark({sequence: ++sequence, step});
+            }
         },
         log(message): void {
             renderer.log?.(message);

@@ -30,12 +30,17 @@ pub enum Job {
         interval: JobTick,
         show_time: Option<JobTick>,
     },
+    Initiative {
+        tip: Tip,
+        condition: crate::reaction::sdk_types::UiCondition,
+    },
 }
 
 impl Job {
     pub fn tip(&self) -> &Tip {
         match self {
             Self::Interval { tip, .. } => tip,
+            Self::Initiative { tip, .. } => tip,
         }
     }
 }

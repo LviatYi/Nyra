@@ -158,7 +158,8 @@ fn launch() -> Result<(), String> {
         let runner =
             ReactionRunner::new(&config.reaction, &config_path, scripts, impressions.clone())?;
         configure_render_environment();
-        run(config.jobs, runner, impressions)?;
+        let base_dir = impression_path.parent().unwrap().to_path_buf();
+        run(config.jobs, runner, impressions, base_dir)?;
     }
     Ok(())
 }
@@ -252,6 +253,7 @@ fn validate_config(config: &Jobs) -> Result<(), String> {
                     return Err(format!("{name}.showTime must be greater than 0"));
                 }
             }
+            Job::Initiative { .. } => {}
         }
         if let Some(color) = tip.color.as_deref()
             && !is_valid_tip_color(color)
@@ -267,12 +269,15 @@ fn run(
     config: Jobs,
     runner: ReactionRunner,
     impressions: perception::ImpressionStore,
+    base_dir: PathBuf,
 ) -> Result<(), String> {
+    let job_manager = controller::JobManager::prepare(&config, &base_dir, &impressions)?;
     let menu_actions = sensation::tip_overlay::MenuActions::default();
     let (screen_width, screen_height) = primary_screen_size();
     let mut app = App::new();
     app.insert_resource(ClearColor(Color::NONE))
         .insert_resource(JobConfig(config))
+        .insert_resource(job_manager)
         .insert_resource(runner)
         .insert_resource(menu_actions)
         .add_plugins(

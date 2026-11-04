@@ -1,4 +1,6 @@
 mod impression;
+#[cfg(target_os = "windows")]
+mod scaled;
 mod selector;
 pub(crate) mod types;
 pub(crate) use impression::{ImpressionPlugin, ImpressionStore};
@@ -6,13 +8,14 @@ pub(crate) use impression::{ImpressionPlugin, ImpressionStore};
 use std::{fs, path::Path};
 pub(super) use types::Region;
 use types::{
-    CaptureTarget, ImageCondition as ConditionConfig, MonitorConfig, PositionUnit, WindowRegion,
+    CaptureTarget, ImageAnchor, ImageCondition as ConditionConfig, ImagePosition, ImageSearch,
+    MonitorConfig, PositionUnit,
 };
 
 const DEFAULT_THRESHOLD: f64 = 0.95;
 const DEFAULT_POLL_INTERVAL_MS: u64 = 500;
 
-impl WindowRegion {
+impl ImagePosition {
     fn validate(&self) -> Result<(), String> {
         for value in [self.x, self.y] {
             let valid = value.is_finite()
@@ -22,49 +25,104 @@ impl WindowRegion {
                     PositionUnit::Ratio => value <= 1.0,
                 };
             if !valid {
-                return Err("Window region x and y must be non-negative integer pixels or ratios between 0 and 1".into());
+                return Err(
+                    "Image position must use non-negative integer pixels or ratios between 0 and 1"
+                        .into(),
+                );
             }
         }
-        validate_region(
-            Region {
-                x: 0,
-                y: 0,
-                width: self.width,
-                height: self.height,
-            },
-            u32::MAX,
-            u32::MAX,
-        )?;
-        if matches!(self.unit, PositionUnit::Pixels) {
-            self.resolve(u32::MAX, u32::MAX)?;
+        if self.tolerance > 1024 {
+            return Err("Image position tolerance cannot exceed 1024 pixels".into());
         }
         Ok(())
     }
+}
 
-    fn resolve(&self, window_width: u32, window_height: u32) -> Result<Region, String> {
-        let (x, y) = match self.unit {
-            PositionUnit::Pixels => (self.x as u32, self.y as u32),
-            PositionUnit::Ratio => (
-                (self.x * f64::from(window_width)).round() as u32,
-                (self.y * f64::from(window_height)).round() as u32,
-            ),
-        };
-        let region = Region {
-            x,
-            y,
-            width: self.width,
-            height: self.height,
-        };
-        validate_region(region, window_width, window_height)?;
-        Ok(region)
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy)]
+enum ResolvedSearch {
+    All,
+    Region(Region),
+    Position { x: f64, y: f64, tolerance: u32 },
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_search(
+    search: &Option<ImageSearch>,
+    width: u32,
+    height: u32,
+) -> Result<ResolvedSearch, String> {
+    match search {
+        None => Ok(ResolvedSearch::All),
+        Some(ImageSearch::Region { region }) => {
+            validate_region(*region, width, height)?;
+            Ok(ResolvedSearch::Region(*region))
+        }
+        Some(ImageSearch::Position { position }) => {
+            let (x, y) = match position.unit {
+                PositionUnit::Pixels => (position.x, position.y),
+                PositionUnit::Ratio => (
+                    position.x * f64::from(width),
+                    position.y * f64::from(height),
+                ),
+            };
+            if x > f64::from(width) || y > f64::from(height) {
+                return Err("Image anchor position is outside the capture target".into());
+            }
+            Ok(ResolvedSearch::Position {
+                x,
+                y,
+                tolerance: position.tolerance,
+            })
+        }
     }
 }
 
-impl CaptureTarget {
-    fn template_size(&self) -> (u32, u32) {
-        match self {
-            Self::Screen { region, .. } => (region.width, region.height),
-            Self::Window { region, .. } => (region.width, region.height),
+/// Rectangle containing every valid template placement for the selected search.
+#[cfg(target_os = "windows")]
+fn candidate_region(
+    frame: opencv::core::Size,
+    size: opencv::core::Size,
+    search: ResolvedSearch,
+    anchor: ImageAnchor,
+) -> Option<opencv::core::Rect> {
+    use opencv::core::Rect;
+    if size.width <= 0 || size.height <= 0 || size.width > frame.width || size.height > frame.height
+    {
+        return None;
+    }
+    match search {
+        ResolvedSearch::All => Some(Rect::new(0, 0, frame.width, frame.height)),
+        ResolvedSearch::Region(region) => {
+            if i64::from(region.width) < i64::from(size.width)
+                || i64::from(region.height) < i64::from(size.height)
+            {
+                return None;
+            }
+            Some(Rect::new(
+                region.x as i32,
+                region.y as i32,
+                region.width as i32,
+                region.height as i32,
+            ))
+        }
+        ResolvedSearch::Position { x, y, tolerance } => {
+            let nominal_x = (x - anchor.x * f64::from(size.width)).round() as i64;
+            let nominal_y = (y - anchor.y * f64::from(size.height)).round() as i64;
+            let left = (nominal_x - i64::from(tolerance)).max(0);
+            let top = (nominal_y - i64::from(tolerance)).max(0);
+            let right = (nominal_x + i64::from(tolerance)).min(i64::from(frame.width - size.width));
+            let bottom =
+                (nominal_y + i64::from(tolerance)).min(i64::from(frame.height - size.height));
+            if left > right || top > bottom {
+                return None;
+            }
+            Some(Rect::new(
+                left as i32,
+                top as i32,
+                (right - left + i64::from(size.width)) as i32,
+                (bottom - top + i64::from(size.height)) as i32,
+            ))
         }
     }
 }
@@ -85,6 +143,8 @@ pub(crate) struct ImageCondition {
     key: String,
     #[cfg(target_os = "windows")]
     impressions: ImpressionStore,
+    #[cfg(target_os = "windows")]
+    scaled: Option<scaled::ScaledSearch>,
 }
 
 impl ImageCondition {
@@ -105,25 +165,30 @@ impl ImageCondition {
                 )
             })?
             .into_rgba8();
-        let (width, height) = config.target.template_size();
-        if image.width() != width || image.height() != height {
-            return Err(format!(
-                "Template size does not match the region: {}",
-                template_path.display()
-            ));
-        }
         let mut hash = blake3::Hasher::new();
-        hash.update(b"nyra-offset-impression-v1");
-        hash.update(&serde_json::to_vec(&config.target).map_err(|error| error.to_string())?);
-        hash.update(&config.offset_tolerance.to_le_bytes());
+        hash.update(if config.scale_invariant {
+            b"nyra-scaled-search-v2"
+        } else {
+            b"nyra-fixed-search-v2"
+        });
+        hash.update(
+            &serde_json::to_vec(&(&config.target, &config.search, &config.anchor))
+                .map_err(|error| error.to_string())?,
+        );
         hash.update(image.as_raw());
         let key = hash.finalize().to_hex().to_string();
-        let template = rgba_to_rgb(image.as_raw(), height)?;
+        let template = rgba_to_rgb(image.as_raw(), image.height())?;
+        let scaled = if config.scale_invariant {
+            Some(scaled::ScaledSearch::prepare(&template)?)
+        } else {
+            None
+        };
         Ok(Self {
             config,
             template,
             key,
             impressions,
+            scaled,
         })
     }
 
@@ -136,68 +201,126 @@ impl ImageCondition {
         Err("Perception matching currently requires Windows".into())
     }
 
-    /// None means the target is unavailable, never a successful match.
+    /// None means the target is unavailable or the search is inconclusive.
     #[cfg(target_os = "windows")]
     pub(crate) fn matches(&self) -> Result<Option<bool>, String> {
+        use std::io::Write;
+
+        let started = std::time::Instant::now();
+        let result = self.matches_once();
+        let status = match &result {
+            Ok(Some(true)) => "matched",
+            Ok(Some(false)) => "not_matched",
+            Ok(None) => "inconclusive",
+            Err(_) => "error",
+        };
+        let mut output = std::io::stdout().lock();
+        if let Err(error) = &result {
+            let _ = writeln!(
+                output,
+                "[Perception] template={:?} result={status} elapsedMs={} error={error}",
+                self.config.template,
+                started.elapsed().as_millis()
+            );
+        } else {
+            let _ = writeln!(
+                output,
+                "[Perception] template={:?} result={status} elapsedMs={}",
+                self.config.template,
+                started.elapsed().as_millis()
+            );
+        }
+        result
+    }
+
+    #[cfg(target_os = "windows")]
+    fn matches_once(&self) -> Result<Option<bool>, String> {
         use impression::Offset;
         use opencv::{
             core::{self, Mat, Point, Rect},
             imgproc,
             prelude::*,
         };
-        let Some((image, origin)) =
-            capture_target(&self.config.target, self.config.offset_tolerance)?
-        else {
-            return Ok(None);
+        let started = std::time::Instant::now();
+        let (image, search) = match capture_target(
+            &self.config,
+            self.template.size().map_err(|error| error.to_string())?,
+        )? {
+            Capture::Unavailable => return Ok(None),
+            Capture::NoCandidates => return Ok(Some(false)),
+            Capture::Frame(image, search) => (image, search),
         };
         let frame = rgba_to_rgb(image.as_raw(), image.height())?;
+        if let Some(scaled) = &self.scaled {
+            return scaled.matches(
+                &frame,
+                self.config.threshold.unwrap_or(0.995),
+                &self.key,
+                &self.impressions,
+                started,
+                search,
+                self.config.anchor,
+            );
+        }
         let width = self.template.cols();
         let height = self.template.rows();
-        let denominator = f64::from(width) * f64::from(height) * 3.0 * 255.0 * 255.0;
-        let threshold = self.config.threshold;
-        let mut offsets = self.impressions.offsets(&self.key);
-        offsets.push(Offset { x: 0, y: 0 });
-        for offset in offsets {
-            if offset.x.unsigned_abs() > self.config.offset_tolerance
-                || offset.y.unsigned_abs() > self.config.offset_tolerance
-            {
-                continue;
-            }
-            let x = origin.x + offset.x;
-            let y = origin.y + offset.y;
-            if x < 0 || y < 0 || x + width > frame.cols() || y + height > frame.rows() {
-                continue;
-            }
-            let roi = Mat::roi(&frame, Rect::new(x, y, width, height))
-                .map_err(|error| error.to_string())?;
-            let mut result = Mat::default();
-            imgproc::match_template(
-                &roi,
-                &self.template,
-                &mut result,
-                imgproc::TM_SQDIFF,
-                &core::no_array(),
-            )
-            .map_err(|error| error.to_string())?;
-            let score = 1.0
-                - f64::from(
-                    *result
-                        .at_2d::<f32>(0, 0)
-                        .map_err(|error| error.to_string())?,
-                )
-                .max(0.0)
-                    / denominator;
-            if score >= threshold {
-                self.impressions.observe(&self.key, offset);
-                return Ok(Some(true));
-            }
-        }
-        if self.config.offset_tolerance == 0 {
+        let Some(area) = candidate_region(
+            frame.size().map_err(|error| error.to_string())?,
+            self.template.size().map_err(|error| error.to_string())?,
+            search,
+            self.config.anchor,
+        ) else {
             return Ok(Some(false));
+        };
+        let denominator = f64::from(width) * f64::from(height) * 3.0 * 255.0 * 255.0;
+        let threshold = self.config.threshold.unwrap_or(0.95);
+        if let ResolvedSearch::Position { x, y, tolerance } = search {
+            let origin_x = (x - self.config.anchor.x * f64::from(width)).round() as i64;
+            let origin_y = (y - self.config.anchor.y * f64::from(height)).round() as i64;
+            let mut offsets = self.impressions.offsets(&self.key);
+            offsets.push(Offset { x: 0, y: 0 });
+            for offset in offsets {
+                if offset.x.unsigned_abs() > tolerance || offset.y.unsigned_abs() > tolerance {
+                    continue;
+                }
+                let px = origin_x + i64::from(offset.x);
+                let py = origin_y + i64::from(offset.y);
+                if px < i64::from(area.x)
+                    || py < i64::from(area.y)
+                    || px + i64::from(width) > i64::from(area.x + area.width)
+                    || py + i64::from(height) > i64::from(area.y + area.height)
+                {
+                    continue;
+                }
+                let roi = Mat::roi(&frame, Rect::new(px as i32, py as i32, width, height))
+                    .map_err(|error| error.to_string())?;
+                let mut result = Mat::default();
+                imgproc::match_template(
+                    &roi,
+                    &self.template,
+                    &mut result,
+                    imgproc::TM_SQDIFF,
+                    &core::no_array(),
+                )
+                .map_err(|error| error.to_string())?;
+                let score = 1.0
+                    - f64::from(
+                        *result
+                            .at_2d::<f32>(0, 0)
+                            .map_err(|error| error.to_string())?,
+                    )
+                    .max(0.0)
+                        / denominator;
+                if score >= threshold {
+                    self.impressions.observe(&self.key, offset);
+                    return Ok(Some(true));
+                }
+            }
         }
+        let roi = Mat::roi(&frame, area).map_err(|error| error.to_string())?;
         let mut result = Mat::default();
         imgproc::match_template(
-            &frame,
+            &roi,
             &self.template,
             &mut result,
             imgproc::TM_SQDIFF,
@@ -216,13 +339,17 @@ impl ImageCondition {
         )
         .map_err(|error| error.to_string())?;
         if 1.0 - min.max(0.0) / denominator >= threshold {
-            self.impressions.observe(
-                &self.key,
-                Offset {
-                    x: location.x - origin.x,
-                    y: location.y - origin.y,
-                },
-            );
+            if let ResolvedSearch::Position { x, y, .. } = search {
+                let origin_x = (x - self.config.anchor.x * f64::from(width)).round() as i32;
+                let origin_y = (y - self.config.anchor.y * f64::from(height)).round() as i32;
+                self.impressions.observe(
+                    &self.key,
+                    Offset {
+                        x: area.x + location.x - origin_x,
+                        y: area.y + location.y - origin_y,
+                    },
+                );
+            }
             Ok(Some(true))
         } else {
             Ok(Some(false))
@@ -356,7 +483,7 @@ pub fn record_condition(
         RecordTarget::Window(_) => windows.first(),
         RecordTarget::Screen => None,
     };
-    let target = if let Some(window) = window {
+    let (target_source, position_x, position_y) = if let Some(window) = window {
         let relative_x = selected_x - i64::from(window.x);
         let relative_y = selected_y - i64::from(window.y);
         let relative_region = Region {
@@ -368,28 +495,21 @@ pub fn record_condition(
             height: region.height,
         };
         validate_region(relative_region, window.width, window.height)?;
-        CaptureTarget::Window {
-            title: match record_target {
-                RecordTarget::Window(title) => title.to_string(),
-                _ => window.title.clone(),
-            },
-            region: WindowRegion {
-                x: f64::from(relative_region.x),
-                y: f64::from(relative_region.y),
-                width: relative_region.width,
-                height: relative_region.height,
-                unit: PositionUnit::Pixels,
-            },
-        }
+        let title = match record_target {
+            RecordTarget::Window(title) => title,
+            _ => &window.title,
+        };
+        (
+            format!("{{mode: \"window\", title: {title:?}}}"),
+            relative_region.x,
+            relative_region.y,
+        )
     } else {
-        CaptureTarget::Screen {
-            monitor: MonitorConfig {
-                name: Some(monitor_name),
-                width: monitor_width,
-                height: monitor_height,
-            },
-            region,
-        }
+        (
+            format!("{{mode: \"fullScreen\", monitorName: {monitor_name:?}}}"),
+            region.x,
+            region.y,
+        )
     };
 
     let template_directory = template_path
@@ -428,30 +548,13 @@ pub fn record_condition(
             template_path.display()
         )
     })?;
-    let target_source = match &target {
-        CaptureTarget::Window { title, region } => format!(
-            "{{mode: \"window\", title: {title:?}, region: {{x: {}, y: {}, width: {}, height: {}}}}}",
-            region.x, region.y, region.width, region.height
-        ),
-        CaptureTarget::Screen { monitor, region } => format!(
-            "{{mode: \"screen\", monitor: {{name: {}, width: {}, height: {}}}, region: {{x: {}, y: {}, width: {}, height: {}}}}}",
-            monitor
-                .name
-                .as_ref()
-                .map(|name| format!("{name:?}"))
-                .unwrap_or_else(|| "null".into()),
-            monitor.width,
-            monitor.height,
-            region.x,
-            region.y,
-            region.width,
-            region.height
-        ),
-    };
     let template = template_path.to_string_lossy();
     println!(
-        "[Perception] Image: {}\nCopy this condition into your script's before option (template path is relative to the main configuration directory):\n{{\n    kind: \"image\",\n    target: {target_source},\n    template: {template:?},\n    threshold: {DEFAULT_THRESHOLD},\n    pollIntervalMs: {DEFAULT_POLL_INTERVAL_MS},\n}}",
+        "[Perception] Image: {}\nCopy this condition into your script's before option (template path is relative to the main configuration directory):\n{{\n    kind: \"image\",\n    target: {target_source},\n    search: {{kind: \"position\", position: {{x: {position_x}, y: {position_y}}}}},\n    template: {template:?},\n    threshold: {DEFAULT_THRESHOLD},\n    pollIntervalMs: {DEFAULT_POLL_INTERVAL_MS},\n}}",
         template_path.display()
+    );
+    println!(
+        "[Perception] To search the primary screen at an unknown scale instead:\n{{kind: \"image\", template: {template:?}, scaleInvariant: true}}"
     );
     Ok(())
 }
@@ -483,20 +586,41 @@ fn window_bounds(window: &xcap::Window) -> Result<WindowBounds, String> {
 }
 
 fn validate_condition(condition: &ConditionConfig) -> Result<(), String> {
-    if !(0.0..=1.0).contains(&condition.threshold) || !condition.threshold.is_finite() {
+    if condition
+        .threshold
+        .is_some_and(|threshold| !(0.0..=1.0).contains(&threshold) || !threshold.is_finite())
+    {
         return Err("Perception condition threshold must be between 0 and 1".into());
     }
-    if condition.offset_tolerance > 1024 {
-        return Err("offsetTolerance cannot exceed 1024 pixels".into());
+    if !condition.anchor.x.is_finite()
+        || !condition.anchor.y.is_finite()
+        || !(0.0..=1.0).contains(&condition.anchor.x)
+        || !(0.0..=1.0).contains(&condition.anchor.y)
+    {
+        return Err("Image anchor coordinates must be between 0 and 1".into());
     }
-    if condition.timeout_ms == 0
-        || condition.poll_interval_ms == 0
-        || condition.poll_interval_ms > condition.timeout_ms
+    if let Some(ImageSearch::Position { position }) = &condition.search {
+        position.validate()?;
+    }
+    if let Some(ImageSearch::Region { region }) = &condition.search {
+        validate_region(*region, u32::MAX, u32::MAX)?;
+    }
+    if condition.timeout_ms() == 0
+        || condition.poll_interval_ms() == 0
+        || condition.poll_interval_ms() > condition.timeout_ms()
     {
         return Err("Image condition requires 0 < pollIntervalMs <= timeoutMs".into());
     }
     match &condition.target {
-        CaptureTarget::Screen { monitor, region } => {
+        CaptureTarget::FullScreen { monitor_name } => {
+            if monitor_name
+                .as_ref()
+                .is_some_and(|name| name.trim().is_empty())
+            {
+                return Err("Perception screen monitor name cannot be empty".into());
+            }
+        }
+        CaptureTarget::Screen { monitor } => {
             if monitor
                 .name
                 .as_ref()
@@ -504,12 +628,11 @@ fn validate_condition(condition: &ConditionConfig) -> Result<(), String> {
             {
                 return Err("Perception screen monitor name cannot be empty".into());
             }
-            validate_region(*region, monitor.width, monitor.height)?;
+            if monitor.width == 0 || monitor.height == 0 {
+                return Err("Monitor dimensions must be positive".into());
+            }
         }
-        CaptureTarget::Window { title, region } => {
-            validate_window_selector(title)?;
-            region.validate()?;
-        }
+        CaptureTarget::Window { title } => validate_window_selector(title)?,
     }
     if condition.template.trim().is_empty() {
         return Err("Image condition template cannot be empty".into());
@@ -547,14 +670,14 @@ fn validate_region(region: Region, monitor_width: u32, monitor_height: u32) -> R
 
 #[cfg(target_os = "windows")]
 fn validate_screen_target(target: &CaptureTarget) -> Result<(), String> {
-    if let CaptureTarget::Screen { monitor, region } = target {
-        screen_monitor(monitor, *region)?;
+    if let CaptureTarget::Screen { monitor } = target {
+        screen_monitor(monitor)?;
     }
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn screen_monitor(config: &MonitorConfig, region: Region) -> Result<xcap::Monitor, String> {
+fn screen_monitor(config: &MonitorConfig) -> Result<xcap::Monitor, String> {
     let monitor = match config.name.as_deref() {
         Some(name) => monitor_by_name(name)?,
         None => primary_monitor()?,
@@ -567,114 +690,110 @@ fn screen_monitor(config: &MonitorConfig, region: Region) -> Result<xcap::Monito
             config.width, config.height, width, height
         ));
     }
-    validate_region(region, width, height)?;
     Ok(monitor)
 }
 
 #[cfg(target_os = "windows")]
+enum Capture {
+    Unavailable,
+    NoCandidates,
+    Frame(xcap::image::RgbaImage, ResolvedSearch),
+}
+
+#[cfg(target_os = "windows")]
 fn capture_target(
-    target: &CaptureTarget,
-    tolerance: u32,
-) -> Result<Option<(xcap::image::RgbaImage, opencv::core::Point)>, String> {
-    use opencv::core::Point;
-    let (monitor, nominal, bounds) = match target {
-        CaptureTarget::Screen { monitor, region } => {
-            let selected = screen_monitor(monitor, *region)?;
-            (selected, *region, (monitor.width, monitor.height))
+    config: &ConditionConfig,
+    template_size: opencv::core::Size,
+) -> Result<Capture, String> {
+    use opencv::core::{Rect, Size};
+    let (width, height, window, monitor) = match &config.target {
+        CaptureTarget::FullScreen { monitor_name } => {
+            let monitor = match monitor_name.as_deref() {
+                Some(name) => monitor_by_name(name)?,
+                None => primary_monitor()?,
+            };
+            let width = monitor.width().map_err(|error| error.to_string())?;
+            let height = monitor.height().map_err(|error| error.to_string())?;
+            (width, height, None, Some(monitor))
         }
-        CaptureTarget::Window { title, region } => {
+        CaptureTarget::Screen { monitor } => {
+            let selected = screen_monitor(monitor)?;
+            (monitor.width, monitor.height, None, Some(selected))
+        }
+        CaptureTarget::Window { title } => {
             let window = window_by_selector(title)?;
             if !window.is_focused().map_err(|error| error.to_string())? {
-                return Ok(None);
+                return Ok(Capture::Unavailable);
             }
             if window.is_minimized().map_err(|error| error.to_string())? {
                 return Err("Target window is minimized".into());
             }
             let width = window.width().map_err(|error| error.to_string())?;
             let height = window.height().map_err(|error| error.to_string())?;
-            let local = region.resolve(width, height)?;
-            let wx = i64::from(window.x().map_err(|error| error.to_string())?);
-            let wy = i64::from(window.y().map_err(|error| error.to_string())?);
-            let monitors = xcap::Monitor::all().map_err(|error| error.to_string())?;
-            let mut found = None;
-            for monitor in monitors {
-                let mx = i64::from(monitor.x().map_err(|error| error.to_string())?);
-                let my = i64::from(monitor.y().map_err(|error| error.to_string())?);
-                let mw = monitor.width().map_err(|error| error.to_string())?;
-                let mh = monitor.height().map_err(|error| error.to_string())?;
-                let x = wx + i64::from(local.x) - mx;
-                let y = wy + i64::from(local.y) - my;
-                if x >= 0
-                    && y >= 0
-                    && x + i64::from(local.width) <= i64::from(mw)
-                    && y + i64::from(local.height) <= i64::from(mh)
-                {
-                    let left = (mx - wx).max(0) as u32;
-                    let top = (my - wy).max(0) as u32;
-                    let right = (mx + i64::from(mw) - wx).min(i64::from(width)) as u32;
-                    let bottom = (my + i64::from(mh) - wy).min(i64::from(height)) as u32;
-                    found = Some((monitor, local, (left, top, right, bottom), (mx, my)));
-                    break;
-                }
-            }
-            let (monitor, local, (left, top, right, bottom), (mx, my)) =
-                found.ok_or("Window region is not fully visible on one monitor")?;
-            let clipped = expand_region(local, tolerance, left, top, right, bottom);
-            let origin = Point::new((local.x - clipped.x) as i32, (local.y - clipped.y) as i32);
-            let x =
-                u32::try_from(wx + i64::from(clipped.x) - mx).map_err(|error| error.to_string())?;
-            let y =
-                u32::try_from(wy + i64::from(clipped.y) - my).map_err(|error| error.to_string())?;
-            let frame = monitor
-                .capture_region(x, y, clipped.width, clipped.height)
-                .map_err(|error| error.to_string())?;
-            return if window.is_focused().map_err(|error| error.to_string())? {
-                Ok(Some((frame, origin)))
-            } else {
-                Ok(None)
-            };
+            (width, height, Some(window), None)
         }
     };
-    let clipped = expand_region(nominal, tolerance, 0, 0, bounds.0, bounds.1);
-    let frame = monitor
-        .capture_region(clipped.x, clipped.y, clipped.width, clipped.height)
-        .map_err(|error| error.to_string())?;
-    Ok(Some((
-        frame,
-        Point::new(
-            (nominal.x - clipped.x) as i32,
-            (nominal.y - clipped.y) as i32,
-        ),
-    )))
-}
-
-#[cfg(target_os = "windows")]
-fn expand_region(
-    region: Region,
-    tolerance: u32,
-    left: u32,
-    top: u32,
-    right: u32,
-    bottom: u32,
-) -> Region {
-    let x = region.x.saturating_sub(tolerance).max(left);
-    let y = region.y.saturating_sub(tolerance).max(top);
-    let end_x = region
-        .x
-        .saturating_add(region.width)
-        .saturating_add(tolerance)
-        .min(right);
-    let end_y = region
-        .y
-        .saturating_add(region.height)
-        .saturating_add(tolerance)
-        .min(bottom);
-    Region {
-        x,
-        y,
-        width: end_x - x,
-        height: end_y - y,
+    let frame_size = Size::new(
+        i32::try_from(width).map_err(|_| "Target width is too large")?,
+        i32::try_from(height).map_err(|_| "Target height is too large")?,
+    );
+    let search = resolve_search(&config.search, width, height)?;
+    let area = if !config.scale_invariant {
+        match candidate_region(frame_size, template_size, search, config.anchor) {
+            Some(area) => area,
+            None => return Ok(Capture::NoCandidates),
+        }
+    } else if let ResolvedSearch::Region(region) = search {
+        Rect::new(
+            region.x as i32,
+            region.y as i32,
+            region.width as i32,
+            region.height as i32,
+        )
+    } else {
+        Rect::new(0, 0, frame_size.width, frame_size.height)
+    };
+    let local_search = match search {
+        ResolvedSearch::Position { x, y, tolerance } => ResolvedSearch::Position {
+            x: x - f64::from(area.x),
+            y: y - f64::from(area.y),
+            tolerance,
+        },
+        _ => ResolvedSearch::All,
+    };
+    if let Some(monitor) = monitor {
+        let image = monitor
+            .capture_region(
+                area.x as u32,
+                area.y as u32,
+                area.width as u32,
+                area.height as u32,
+            )
+            .map_err(|error| error.to_string())?;
+        return Ok(Capture::Frame(image, local_search));
     }
+    let window = window.unwrap();
+    let wx = i64::from(window.x().map_err(|error| error.to_string())?);
+    let wy = i64::from(window.y().map_err(|error| error.to_string())?);
+    for monitor in xcap::Monitor::all().map_err(|error| error.to_string())? {
+        let mx = i64::from(monitor.x().map_err(|error| error.to_string())?);
+        let my = i64::from(monitor.y().map_err(|error| error.to_string())?);
+        let mw = i64::from(monitor.width().map_err(|error| error.to_string())?);
+        let mh = i64::from(monitor.height().map_err(|error| error.to_string())?);
+        let x = wx + i64::from(area.x) - mx;
+        let y = wy + i64::from(area.y) - my;
+        if x >= 0 && y >= 0 && x + i64::from(area.width) <= mw && y + i64::from(area.height) <= mh {
+            let image = monitor
+                .capture_region(x as u32, y as u32, area.width as u32, area.height as u32)
+                .map_err(|error| error.to_string())?;
+            return if window.is_focused().map_err(|error| error.to_string())? {
+                Ok(Capture::Frame(image, local_search))
+            } else {
+                Ok(Capture::Unavailable)
+            };
+        }
+    }
+    Err("Search region is not fully visible on one monitor".into())
 }
 
 #[cfg(target_os = "windows")]

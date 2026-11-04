@@ -1,6 +1,35 @@
-use crate::job::{Job, JobConfig};
+use crate::{
+    job::{Job, JobConfig, Jobs},
+    perception::{ImageCondition, ImpressionStore},
+    reaction::ReactionRunner,
+    reaction::sdk_types::UiCondition,
+};
 use bevy::prelude::*;
-use std::time::Duration;
+use std::{
+    path::Path,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
+
+const INITIATIVE_ROTATION: Duration = Duration::from_secs(5);
+
+enum InitiativeCondition {
+    Image {
+        matcher: Mutex<ImageCondition>,
+        interval: Duration,
+        next_poll: Instant,
+    },
+    Delay {
+        ready_at: Instant,
+    },
+}
+
+struct InitiativeRuntime {
+    index: usize,
+    condition: InitiativeCondition,
+    matched: bool,
+    last_error: Option<String>,
+}
 
 pub(crate) struct ActiveJob {
     pub(crate) current_index: usize,
@@ -61,11 +90,121 @@ impl JobRuntimeState {
 /// later conditions can extend `JobRuntimeState` and `select_next` without coupling
 /// them to overlay rendering.
 #[derive(Resource, Default)]
-pub(super) struct JobManager {
+pub(crate) struct JobManager {
     jobs: Vec<JobRuntimeState>,
+    initiative: Vec<InitiativeRuntime>,
+    next_poll: usize,
+    rotation_at: Option<Duration>,
+    suspended_interval: Option<(usize, Duration)>,
+    sleeping: bool,
 }
 
 impl JobManager {
+    fn set_sleeping(&mut self, sleeping: bool) {
+        if self.sleeping == sleeping {
+            return;
+        }
+        self.sleeping = sleeping;
+        if !sleeping {
+            let now = Instant::now();
+            for item in &mut self.initiative {
+                if let InitiativeCondition::Image { next_poll, .. } = &mut item.condition {
+                    item.matched = false;
+                    *next_poll = now;
+                }
+            }
+        }
+    }
+    pub(crate) fn prepare(
+        config: &Jobs,
+        base_dir: &Path,
+        impressions: &ImpressionStore,
+    ) -> Result<Self, String> {
+        let mut manager = Self::default();
+        let now = Instant::now();
+        for (index, job) in config.jobs.iter().enumerate() {
+            let Job::Initiative { condition, .. } = job else {
+                continue;
+            };
+            let condition = match condition {
+                UiCondition::Delay(delay) => InitiativeCondition::Delay {
+                    ready_at: now
+                        .checked_add(Duration::from_millis(delay.duration_ms))
+                        .ok_or_else(|| format!("jobs[{index}].condition duration is too large"))?,
+                },
+                UiCondition::Image(image) => {
+                    let interval = Duration::from_millis(image.poll_interval_ms());
+                    if now.checked_add(interval).is_none() {
+                        return Err(format!(
+                            "jobs[{index}].condition poll interval is too large"
+                        ));
+                    }
+                    let matcher =
+                        ImageCondition::prepare(image.clone(), base_dir, impressions.clone())
+                            .map_err(|error| format!("jobs[{index}].condition: {error}"))?;
+                    InitiativeCondition::Image {
+                        matcher: Mutex::new(matcher),
+                        interval,
+                        next_poll: now,
+                    }
+                }
+            };
+            manager.initiative.push(InitiativeRuntime {
+                index,
+                condition,
+                matched: false,
+                last_error: None,
+            });
+        }
+        Ok(manager)
+    }
+
+    fn poll_initiatives(&mut self) {
+        let now = Instant::now();
+        for item in &mut self.initiative {
+            if let InitiativeCondition::Delay { ready_at } = &item.condition {
+                item.matched = now >= *ready_at;
+            }
+        }
+        let count = self.initiative.len();
+        for step in 0..count {
+            let index = (self.next_poll + step) % count;
+            let item = &mut self.initiative[index];
+            let InitiativeCondition::Image {
+                matcher,
+                interval,
+                next_poll,
+            } = &mut item.condition
+            else {
+                continue;
+            };
+            if now < *next_poll {
+                continue;
+            }
+            let result = matcher
+                .lock()
+                .map_err(|_| "Image condition state is unavailable".to_string())
+                .and_then(|image| image.matches());
+            let completed_at = Instant::now();
+            *next_poll = completed_at.checked_add(*interval).unwrap_or(completed_at);
+            match result {
+                Ok(value) => {
+                    item.matched = value == Some(true);
+                    item.last_error = None;
+                }
+                Err(error) => {
+                    item.matched = false;
+                    if item.last_error.as_deref() != Some(error.as_str()) {
+                        eprintln!("[Initiative job {}] {error}", item.index);
+                        item.last_error = Some(error);
+                    }
+                }
+            }
+            self.next_poll = (index + 1) % count;
+            break;
+        }
+    }
+
     fn eval_update_at(
         &mut self,
         config: &JobConfig,
@@ -74,11 +213,78 @@ impl JobManager {
     ) -> JobUpdate {
         self.synchronize_job_count(config.0.jobs.len());
         if config.is_empty() {
+            self.suspended_interval = None;
+            self.rotation_at = None;
             return if state.active_job.is_some() {
                 JobUpdate::Replace(None)
             } else {
                 JobUpdate::Unchanged
             };
+        }
+
+        let eligible = self
+            .initiative
+            .iter()
+            .filter(|item| {
+                item.matched
+                    && matches!(config.0.jobs.get(item.index), Some(Job::Initiative { .. }))
+            })
+            .map(|item| item.index)
+            .collect::<Vec<_>>();
+        if !eligible.is_empty() {
+            let current = state
+                .current_index()
+                .filter(|index| matches!(config.0.jobs.get(*index), Some(Job::Initiative { .. })));
+            if let Some(index) = current {
+                if eligible.contains(&index)
+                    && (eligible.len() == 1
+                        || self.rotation_at.is_some_and(|deadline| now < deadline))
+                {
+                    return JobUpdate::Unchanged;
+                }
+            } else if let Some(active) = state.active_job.as_ref() {
+                if matches!(
+                    config.0.jobs.get(active.current_index),
+                    Some(Job::Interval { .. })
+                ) {
+                    let remaining = active.ends_at.unwrap_or(now).saturating_sub(now);
+                    if remaining.is_zero() {
+                        self.jobs[active.current_index].finished_at = Some(now);
+                    } else {
+                        self.suspended_interval = Some((active.current_index, remaining));
+                    }
+                }
+            }
+            let next = current
+                .and_then(|index| {
+                    eligible
+                        .iter()
+                        .copied()
+                        .find(|candidate| *candidate > index)
+                })
+                .unwrap_or(eligible[0]);
+            self.rotation_at = Some(now.saturating_add(INITIATIVE_ROTATION));
+            return JobUpdate::Replace(Some(self.create_job(config, next, now)));
+        }
+
+        if state
+            .current_index()
+            .is_some_and(|index| matches!(config.0.jobs.get(index), Some(Job::Initiative { .. })))
+        {
+            self.rotation_at = None;
+            if let Some((index, remaining)) = self.suspended_interval.take() {
+                if matches!(config.0.jobs.get(index), Some(Job::Interval { .. })) {
+                    return JobUpdate::Replace(Some(ActiveJob {
+                        current_index: index,
+                        started_at: now,
+                        ends_at: Some(now.saturating_add(remaining)),
+                    }));
+                }
+            }
+            let next = self
+                .select_next(config, now, None)
+                .map(|index| self.create_job(config, index, now));
+            return JobUpdate::Replace(next);
         }
 
         let Some(active_job) = state.active_job.as_ref() else {
@@ -110,6 +316,7 @@ impl JobManager {
             Job::Interval { show_time, .. } => Some(now.saturating_add(Duration::from_secs(
                 show_time.unwrap_or(crate::settings_default_values::DEFAULT_TIP_SHOW_TIME),
             ))),
+            Job::Initiative { .. } => None,
         };
         ActiveJob {
             current_index: index,
@@ -152,12 +359,28 @@ impl JobManager {
             })
             .map(|(index, _)| index)
             // Continuous display is preferred to waiting when every alternative is blocked.
-            .or(completed_index.filter(|index| *index < config.0.jobs.len()))
+            .or(completed_index
+                .filter(|index| matches!(config.0.jobs.get(*index), Some(Job::Interval { .. }))))
     }
 
     fn synchronize_job_count(&mut self, job_count: usize) {
         self.jobs.resize_with(job_count, JobRuntimeState::default);
     }
+}
+
+pub(super) fn update_job_sleep(runner: Res<ReactionRunner>, mut manager: ResMut<JobManager>) {
+    let sleeping = runner.is_busy();
+    if manager.sleeping != sleeping {
+        manager.set_sleeping(sleeping);
+    }
+}
+
+pub(super) fn jobs_are_awake(manager: Res<JobManager>) -> bool {
+    !manager.sleeping
+}
+
+pub(super) fn poll_initiatives(mut manager: ResMut<JobManager>) {
+    manager.poll_initiatives();
 }
 
 pub(super) fn process_jobs(

@@ -11,14 +11,14 @@ pub struct ScreenPoint {
     pub y: i32,
 }
 
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
 pub enum DelayConditionKind {
     #[serde(rename = "delay")]
     Delay,
 }
 
 /// A fixed blocking delay, usable before or after an input action.
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DelayCondition {
     #[ts(inline)]
@@ -29,7 +29,7 @@ pub struct DelayCondition {
 use crate::perception::types::ImageCondition;
 
 /// A blocking prerequisite for an input action.
-#[derive(Deserialize, Serialize, TS)]
+#[derive(Clone, Debug, Deserialize, Serialize, TS)]
 #[serde(untagged)]
 pub enum UiCondition {
     Delay(DelayCondition),
@@ -49,6 +49,14 @@ pub enum AfterAction {
 pub enum InputAction {
     Click(ClickInput),
     Drag(DragInput),
+    Log(LogInput),
+}
+
+/// A message written through the host when its prerequisites are satisfied.
+#[derive(Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LogInput {
+    pub message: String,
 }
 
 /// Click payload; the enclosing InputAction supplies the kind discriminator.

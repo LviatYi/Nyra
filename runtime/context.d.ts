@@ -28,13 +28,13 @@ message: string | null, };
 export type AfterAction = DelayCondition;
 
 /**
- * A screen region or a window selected by executable filename first, then exact window title.
+ * A display or a window selected by executable filename or exact title.
  */
-export type CaptureTarget = { "mode": "screen", monitor: MonitorConfig, region: Region, } | { "mode": "window", 
+export type CaptureTarget = { "mode": "fullScreen", monitorName?: string | null, } | { "mode": "screen", monitor: MonitorConfig, } | { "mode": "window", 
 /**
  * Matches executable filenames (case-insensitive) before exact window titles.
  */
-title: string, region: WindowRegion, };
+title: string, };
 
 /**
  * Click payload; the enclosing InputAction supplies the kind discriminator.
@@ -57,26 +57,62 @@ export type DelayCondition = { kind: "delay", durationMs: number, };
 export type DragInput = { from: ScreenPoint, to: ScreenPoint, durationMs: number, };
 
 /**
+ * Anchor inside the template, from (0, 0) at the top left to (1, 1) at the bottom right.
+ */
+export type ImageAnchor = { x: number, y: number, };
+
+/**
  * An image match configured directly in TypeScript, used before an input action.
  */
-export type ImageCondition = { kind: "image", target: CaptureTarget, 
+export type ImageCondition = { kind: "image", target?: CaptureTarget, 
 /**
  * Template image path, relative to the main configuration directory unless absolute.
  */
 template: string, 
 /**
- * Maximum position deviation in physical pixels on each axis; defaults to 16.
+ * Image anchor, defaulting to the top-left corner.
  */
-offsetTolerance?: number, 
+anchor?: ImageAnchor, 
 /**
- * Minimum score in [0, 1]: 1 minus mean squared RGB difference divided by 255²; defaults to 0.95.
+ * Position or region to search; omitted searches the entire capture target.
+ */
+search?: ImageSearch, 
+/**
+ * Enable unknown equal-proportion scale search. Disabled by default.
+ */
+scaleInvariant?: boolean, 
+/**
+ * Minimum RGB similarity in [0, 1]. Defaults to 0.95 or 0.995 for scale search.
  */
 threshold?: number, timeoutMs?: number, pollIntervalMs?: number, };
 
 /**
+ * Position of the image anchor relative to the capture target.
+ */
+export type ImagePosition = { x: number, y: number, 
+/**
+ * Defaults to physical pixels; ratio positions are relative to the capture target.
+ */
+unit?: PositionUnit, 
+/**
+ * Maximum deviation from this position in physical pixels, default 16.
+ */
+tolerance?: number, };
+
+/**
+ * Restrict the search to an anchor position or a rectangle; omit to search the whole target.
+ */
+export type ImageSearch = { "kind": "position", position: ImagePosition, } | { "kind": "region", region: Region, };
+
+/**
  * An input action independent of its prerequisites and attached actions.
  */
-export type InputAction = { "kind": "click" } & ClickInput | { "kind": "drag" } & DragInput;
+export type InputAction = { "kind": "click" } & ClickInput | { "kind": "drag" } & DragInput | { "kind": "log" } & LogInput;
+
+/**
+ * A message written through the host when its prerequisites are satisfied.
+ */
+export type LogInput = { message: string, };
 
 export type MonitorConfig = { 
 /**
@@ -87,7 +123,7 @@ name?: string | null, width: number, height: number, };
 export type PositionUnit = "pixels" | "ratio";
 
 /**
- * A fixed region measured in physical pixels from the monitor's top-left corner.
+ * A region measured in physical pixels from the capture target's top-left corner.
  */
 export type Region = { x: number, y: number, width: number, height: number, };
 
@@ -108,15 +144,6 @@ y: number, };
  * A blocking prerequisite for an input action.
  */
 export type UiCondition = DelayCondition | ImageCondition;
-
-/**
- * Position relative to the window's top-left corner; dimensions always remain physical pixels.
- */
-export type WindowRegion = { x: number, y: number, width: number, height: number, 
-/**
- * Defaults to pixels. Ratio positions multiply x/y by the current window width/height.
- */
-unit?: PositionUnit, };
 
 /** Context supplied to the default macro entry point. */
 export interface NyraContext {
