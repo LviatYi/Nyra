@@ -1,4 +1,5 @@
 use super::{
+    OverlayPresentation,
     float_light::{FloatLight, float_light_mesh},
     geometry::{BorderGeometry, icon_marker_mesh},
     menu::{
@@ -16,7 +17,8 @@ use crate::sensation::sensation_config::{
 };
 use crate::{
     controller::ActiveJobState,
-    job::JobConfig,
+    job::{Job, JobConfig},
+    reaction::{GlobalHotkeys, ReactionRunner},
     settings_default_values::{WINDOW_HEIGHT, WINDOW_WIDTH},
 };
 use bevy::{
@@ -27,6 +29,7 @@ use bevy::{
     text::{FontSourceTemplate, GenericFontFamily},
     window::{CursorMoved, CursorOptions, PrimaryWindow, WindowEvent, WindowPosition},
 };
+use global_hotkey::hotkey::{HotKey, Modifiers};
 
 #[derive(Resource, Default)]
 pub(super) struct NoticePlacement {
@@ -42,6 +45,12 @@ pub(super) struct NoticeUiBoard;
 
 #[derive(Component, Default, Clone)]
 pub(super) struct TipText;
+#[derive(Component, Default, Clone)]
+pub(super) struct TipSubtitle;
+#[derive(Component, Default, Clone)]
+pub(super) struct TipShortcut;
+#[derive(Component, Default, Clone)]
+pub(super) struct TipSubtitleSuffix;
 #[derive(Component, Default, Clone)]
 pub(super) struct IconMarker;
 #[derive(Component, Default, Clone)]
@@ -212,6 +221,38 @@ pub(super) fn setup_overlay(
                     Pickable::IGNORE
                 ]
                 --
+                Text("")
+                TextFont {
+                    font: FontSourceTemplate::Generic(GenericFontFamily::SystemUi),
+                    font_size: FontSize::Px(4.0),
+                }
+                TextColor(Color::srgb(0.94, 0.96, 1.0))
+                TextLayout::no_wrap()
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: px(66),
+                    top: px(22),
+                    width: px(123),
+                    overflow: Overflow::clip(),
+                }
+                TipSubtitle
+                Pickable::IGNORE
+                Children [
+                    TextSpan("")
+                    TextFont {
+                        font: FontSourceTemplate::Generic(GenericFontFamily::SystemUi),
+                        font_size: FontSize::Px(7.0),
+                    }
+                    TipShortcut
+                    --
+                    TextSpan("")
+                    TextFont {
+                        font: FontSourceTemplate::Generic(GenericFontFamily::SystemUi),
+                        font_size: FontSize::Px(4.0),
+                    }
+                    TipSubtitleSuffix
+                ]
+                --
                 Text("--")
                 TextFont {
                     font: FontSourceTemplate::Generic(GenericFontFamily::SystemUi),
@@ -276,12 +317,35 @@ pub(super) fn setup_overlay(
 }
 
 pub(super) fn sync_notice(
-    jobs: Res<JobConfig>,
-    state: Res<ActiveJobState>,
+    (jobs, state, presentation): (
+        Res<JobConfig>,
+        Res<ActiveJobState>,
+        Res<OverlayPresentation>,
+    ),
     config: Res<SensationConfigHandle>,
     visual_assets: Res<Assets<SensationConfig>>,
     asset_server: Res<AssetServer>,
-    mut text: Single<&mut Text, With<TipText>>,
+    mut text: Single<&mut Text, (With<TipText>, Without<TipSubtitle>)>,
+    mut subtitle: Single<&mut Text, (With<TipSubtitle>, Without<TipText>)>,
+    (mut shortcut_text, mut subtitle_suffix): (
+        Single<&mut TextSpan, (With<TipShortcut>, Without<TipSubtitleSuffix>)>,
+        Single<&mut TextSpan, (With<TipSubtitleSuffix>, Without<TipShortcut>)>,
+    ),
+    mut viewport: Single<&mut Node, (With<TipTextViewport>, Without<TipSubtitle>)>,
+    mut head: Single<&mut Visibility, With<BorderHead>>,
+    runner: Option<Res<ReactionRunner>>,
+    hotkeys: Option<NonSend<GlobalHotkeys>>,
+    mut progress_visibility: Query<
+        &mut Visibility,
+        (
+            Or<(
+                With<BorderProgress>,
+                With<BorderOutgoing>,
+                With<BorderTrack>,
+            )>,
+            Without<BorderHead>,
+        ),
+    >,
     mut countdown_color: Single<&mut TextColor, With<CountdownText>>,
     mut sprites: Query<(
         &mut Sprite,
@@ -298,26 +362,81 @@ pub(super) fn sync_notice(
     )>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    let Some(active) = state.active_job.as_ref() else {
-        return;
+    let banner = *presentation == OverlayPresentation::Banner;
+    let job = if banner {
+        None
+    } else {
+        let Some(active) = state.active_job.as_ref() else {
+            return;
+        };
+        Some((active.current_index, &jobs.0.jobs[active.current_index]))
     };
     let Some(visuals) = config.resolve(&visual_assets, &asset_server) else {
         return;
     };
-    let tip = jobs.0.jobs[active.current_index].tip();
-    let theme = tip_color(&jobs, active.current_index);
-    let content = tip.text.replace(['\r', '\n'], " ");
+    let initiative = job.is_some_and(|(_, job)| matches!(job, Job::Initiative { .. }));
+    let tip = job.map(|(_, job)| job.tip());
+    let shortcut = tip
+        .and_then(|tip| tip.reaction.as_ref())
+        .filter(|reaction| {
+            hotkeys
+                .as_ref()
+                .is_some_and(|hotkeys| hotkeys.is_registered(reaction.hotkey))
+        });
+    let (caption, key, suffix) =
+        if initiative && runner.as_ref().is_some_and(|runner| runner.is_busy()) {
+            ("正在工作中", String::new(), "")
+        } else if let Some(reaction) = shortcut {
+            ("按下 ", compact_hotkey(reaction.hotkey), " 以应对")
+        } else if initiative {
+            ("暂无可用快捷键", String::new(), "")
+        } else {
+            ("", String::new(), "")
+        };
+    if subtitle.0 != caption {
+        subtitle.0 = caption.to_owned();
+    }
+    if shortcut_text.0 != key {
+        shortcut_text.0 = key;
+    }
+    if subtitle_suffix.0 != suffix {
+        subtitle_suffix.0 = suffix.to_owned();
+    }
+    viewport.top = px(if subtitle.0.is_empty() { 9 } else { 3 });
+    viewport.height = px(if subtitle.0.is_empty() { 22 } else { 18 });
+    **head = if banner || initiative {
+        Visibility::Hidden
+    } else {
+        Visibility::Visible
+    };
+    for mut visibility in &mut progress_visibility {
+        *visibility = if banner {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+    }
+    let theme = job
+        .map(|(index, _)| tip_color(&jobs, index))
+        .unwrap_or_else(|| {
+            Color::Srgba(Srgba::hex(crate::settings_default_values::DEFAULT_TIP_COLORS[0]).unwrap())
+        });
+    let content = tip
+        .map(|tip| tip.text.replace(['\r', '\n'], " "))
+        .unwrap_or_else(|| "NYRA ONLINE".to_owned());
     if text.0 != content {
         text.0 = content;
     }
-    countdown_color.0 = theme;
+    countdown_color.0 = if banner { Color::NONE } else { theme };
     for (mut sprite, base_art, icon_background, icon_art) in &mut sprites {
         if base_art.is_some() {
             sprite.color = layer_color(visuals.base_background.as_ref(), theme);
         } else if icon_background.is_some() {
             sprite.color = layer_color(visuals.icon_background.as_ref(), theme);
         } else if let Some(mut icon_art) = icon_art {
-            let icon_path = tip.icon.as_deref().filter(|path| !path.trim().is_empty());
+            let icon_path = tip
+                .and_then(|tip| tip.icon.as_deref())
+                .filter(|path| !path.trim().is_empty());
             icon_art.has_source = icon_path.is_some();
             if let Some(path) = icon_path {
                 sprite.image = asset_server.load(path.to_owned());
@@ -343,11 +462,63 @@ pub(super) fn sync_notice(
     }
 }
 
+fn compact_hotkey(hotkey: HotKey) -> String {
+    let mut parts = Vec::new();
+    if hotkey.mods.contains(Modifiers::CONTROL) {
+        parts.push("CTRL");
+    }
+    if hotkey.mods.contains(Modifiers::ALT) {
+        parts.push("ALT");
+    }
+    if hotkey.mods.contains(Modifiers::SHIFT) {
+        parts.push("SFT");
+    }
+    if hotkey.mods.contains(Modifiers::META) {
+        parts.push("WIN");
+    }
+    let key = hotkey.key.to_string();
+    let key = match key.as_str() {
+        "Backquote" => "`",
+        "Backslash" => "\\",
+        "BracketLeft" => "[",
+        "BracketRight" => "]",
+        "Comma" => ",",
+        "Equal" => "=",
+        "Minus" => "-",
+        "Period" => ".",
+        "Quote" => "'",
+        "Semicolon" => ";",
+        "Slash" => "/",
+        "Escape" => "ESC",
+        "Backspace" => "BKSP",
+        "Delete" => "DEL",
+        "Insert" => "INS",
+        "PageUp" => "PGUP",
+        "PageDown" => "PGDN",
+        "ArrowUp" => "UP",
+        "ArrowDown" => "DOWN",
+        "ArrowLeft" => "LEFT",
+        "ArrowRight" => "RIGHT",
+        "Space" => "SPACE",
+        "Enter" => "ENTER",
+        "Tab" => "TAB",
+        _ => &key,
+    };
+    let key = key
+        .strip_prefix("Key")
+        .filter(|key| key.len() == 1)
+        .or_else(|| key.strip_prefix("Digit").filter(|key| key.len() == 1))
+        .unwrap_or(key);
+    parts.push(key);
+    parts.join("+")
+}
+
 pub(super) fn sync_overlay_visibility(
     state: Res<ActiveJobState>,
+    presentation: Res<OverlayPresentation>,
     mut window: Single<&mut Window, With<PrimaryWindow>>,
 ) {
-    window.visible = state.active_job.is_some();
+    window.visible = *presentation == OverlayPresentation::Banner || state.active_job.is_some();
 }
 
 pub(super) fn sync_icon_placeholder(

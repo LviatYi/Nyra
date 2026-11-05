@@ -14,7 +14,7 @@
         "kind": "image",
         "template": "examples/debug-icon.png",
         "threshold": 0.998,
-        "search": {"kind": "position", "position": {"x": 3151, "y": 0, "tolerance": 50}}
+        "search": {"kind": "position", "position": {"x": 3090, "y": 0, "tolerance": 50}}
       }
     },
     {

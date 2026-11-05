@@ -9,7 +9,7 @@ mod view;
 
 pub(crate) use menu::MenuActions;
 
-use crate::controller::{ActiveJobState, JobProcessing};
+use crate::controller::JobProcessing;
 use crate::sensation::tip_overlay::menu::ActionMenu;
 use crate::sensation::tip_overlay::progress_border::{
     render_border, sync_border_playback, sync_countdown_text,
@@ -22,11 +22,20 @@ use crate::sensation::tip_overlay::view::{
 use bevy::app::{App, PreUpdate, Update};
 use bevy::prelude::*;
 
+/// Selects the overlay presentation while startup is managed externally.
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OverlayPresentation {
+    #[default]
+    Jobs,
+    Banner,
+}
+
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct MenuProcessing;
 
 pub(super) fn configure(app: &mut App) {
-    app.init_resource::<ActionMenu>()
+    app.init_resource::<OverlayPresentation>()
+        .init_resource::<ActionMenu>()
         .init_resource::<MenuActions>()
         .add_systems(
             PreUpdate,
@@ -36,9 +45,8 @@ pub(super) fn configure(app: &mut App) {
             Update,
             (
                 (
-                    (sync_notice, sync_overlay_visibility)
-                        .chain()
-                        .run_if(resource_changed::<ActiveJobState>),
+                    sync_notice,
+                    sync_overlay_visibility,
                     sync_countdown_text,
                     sync_icon_placeholder,
                     animate_tip_text,

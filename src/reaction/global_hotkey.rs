@@ -51,6 +51,10 @@ impl GlobalHotkeys {
         Ok(())
     }
 
+    pub(crate) fn is_registered(&self, hotkey: HotKey) -> bool {
+        self.registered.contains(&hotkey)
+    }
+
     pub(crate) fn just_pressed(&self, hotkey: HotKey) -> bool {
         self.pressed.contains(&hotkey.id())
     }
